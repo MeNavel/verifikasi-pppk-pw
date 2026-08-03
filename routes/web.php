@@ -2,6 +2,7 @@
 
 //Route::livewire('/', 'pages::users.index');
 Route::livewire('/', 'pages::verifikasi-berkas');
+Route::livewire('/rekap', 'pages::rekap-verifikasi');
 Route::get('/preview-pdf/{username}/{filename}', function ($username, $filename) {
     $disk = Storage::disk('sftp_kantor');
     $path = "$username/$filename";

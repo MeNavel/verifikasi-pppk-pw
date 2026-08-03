@@ -47,6 +47,7 @@
                 @endif
 
                 <x-menu-item title="Verifikasi Berkas" icon="o-sparkles" link="/" />
+                <x-menu-item title="Rekap Berkas" icon="o-pencil-square" link="/rekap" />
 
 {{--                <x-menu-sub title="Settings" icon="o-cog-6-tooth">--}}
 {{--                    <x-menu-item title="Wifi" icon="o-wifi" link="####" />--}}
