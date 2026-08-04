@@ -912,6 +912,7 @@ class TargetNipSeeder extends Seeder
             '198803132025212098',
             '197104022025211024',
             '197508062025211057',
+            '200303172025211007',
         ];
 
         $data = array_map(fn ($nip) => [
