@@ -28,13 +28,13 @@ new class extends Component {
         'berkas30' => ['label' => 'Suket Kesehatan', 'ver' => 'ver30', 'cat' => 'cat30', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
     ];
 
-    public function mount()
+    public function mount(): void
     {
         $this->loadPendingNips();
         $this->loadCurrentPegawai();
     }
 
-    public function loadPendingNips()
+    public function loadPendingNips(): void
     {
         $targetNips = DB::table('target_nips')->pluck('nip')->toArray();
 
@@ -60,7 +60,7 @@ new class extends Component {
             ->toArray();
     }
 
-    public function loadCurrentPegawai()
+    public function loadCurrentPegawai(): void
     {
         if (empty($this->pendingNips) || !isset($this->pendingNips[$this->currentPegawaiIndex])) {
             $this->pegawai = null;
@@ -74,7 +74,7 @@ new class extends Component {
         $this->setupAvailableFiles();
     }
 
-    public function setupAvailableFiles()
+    public function setupAvailableFiles(): void
     {
         $this->availableFiles = [];
         $this->currentFileIndex = 0;
@@ -91,7 +91,7 @@ new class extends Component {
     }
 
     // FUNGSI BARU: Pencarian NIP Spesifik
-    public function cariNip()
+    public function cariNip(): void
     {
         $nipClean = trim($this->searchNip);
 
@@ -103,7 +103,7 @@ new class extends Component {
         $pegawaiCari = Pppk::on('kantor')->where('nip', $nipClean)->first();
 
         if (!$pegawaiCari) {
-            $this->error("NIP {$nipClean} tidak ditemukan di database.");
+            $this->error("NIP $nipClean tidak ditemukan di database.");
             return;
         }
 
@@ -111,13 +111,13 @@ new class extends Component {
         $this->setupAvailableFiles();
 
         if (empty($this->availableFiles)) {
-            $this->info("NIP {$nipClean} sudah terverifikasi lengkap semua berkasnya!");
+            $this->info("NIP $nipClean sudah terverifikasi lengkap semua berkasnya!");
         } else {
-            $this->success("Menampilkan data verifikasi untuk NIP {$nipClean}.");
+            $this->success("Menampilkan data verifikasi untuk NIP $nipClean.");
         }
     }
 
-    public function approve()
+    public function approve(): void
     {
         if (!$this->pegawai || empty($this->availableFiles)) return;
 
@@ -135,7 +135,7 @@ new class extends Component {
         $this->nextFileOrPegawai();
     }
 
-    public function tolakDenganCatatan(int $opsiIndex)
+    public function tolakDenganCatatan(int $opsiIndex): void
     {
         if (!$this->pegawai || empty($this->availableFiles)) return;
 
@@ -146,15 +146,15 @@ new class extends Component {
         $catCol = $config['cat'];
         $catatanText = $config['opsi'][$opsiIndex] ?? 'Dokumen tidak sesuai';
 
-        $this->pegawai->$verCol = 0;
+        $this->pegawai->$verCol = 3;
         $this->pegawai->$catCol = $catatanText;
         $this->pegawai->save();
 
-        $this->warning("{$config['label']} ditolak dengan catatan: {$catatanText}");
+        $this->warning("{$config['label']} ditolak dengan catatan: $catatanText");
         $this->nextFileOrPegawai();
     }
 
-    public function nextFileOrPegawai()
+    public function nextFileOrPegawai(): void
     {
         // Re-check available files untuk pegawai saat ini
         $this->setupAvailableFiles();
@@ -169,7 +169,7 @@ new class extends Component {
         }
     }
 
-    public function nextPegawai()
+    public function nextPegawai(): void
     {
         if (count($this->pendingNips) > 0) {
             $this->currentPegawaiIndex = ($this->currentPegawaiIndex + 1) % count($this->pendingNips);
@@ -177,7 +177,7 @@ new class extends Component {
         }
     }
 
-    public function prevPegawai()
+    public function prevPegawai(): void
     {
         if (count($this->pendingNips) > 0) {
             $this->currentPegawaiIndex = ($this->currentPegawaiIndex - 1 + count($this->pendingNips)) % count($this->pendingNips);
@@ -238,7 +238,7 @@ new class extends Component {
                 @endif
             </div>
 
-            <div class="w-[400px] h-full border-l border-base-300 flex flex-col shrink-0 overflow-y-auto p-5 justify-between">
+            <div class="w-100 h-full border-l border-base-300 flex flex-col shrink-0 overflow-y-auto p-5 justify-between">
 
                 <div class="flex flex-col gap-4">
                     <div class="p-4 rounded-xl border border-blue-100 shadow-sm">
