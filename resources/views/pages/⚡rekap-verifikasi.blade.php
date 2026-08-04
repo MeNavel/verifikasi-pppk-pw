@@ -196,7 +196,7 @@ new class extends Component {
 ?>
 
 <div>
-    <x-header title="Rekapitulasi Target Verifikasi (899 Pegawai)" separator progress-indicator>
+    <x-header title="Rekapitulasi Target Verifikasi" separator progress-indicator>
         <x-slot:actions>
             <x-button icon="o-arrow-path" label="Refresh" class="btn-primary" wire:click="$refresh" spinner />
         </x-slot:actions>
