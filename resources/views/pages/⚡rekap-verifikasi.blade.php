@@ -12,13 +12,13 @@ new class extends Component {
     // Properti untuk menyimpan status filter aktif
     public string $filter = 'all';
 
-    public function updatedSearch()
+    public function updatedSearch(): void
     {
         $this->resetPage();
     }
 
     // Fungsi untuk mengubah filter saat stat diklik
-    public function setFilter(string $type)
+    public function setFilter(string $type): void
     {
         // Jika stat yang sama diklik lagi, kembalikan ke 'all' (reset)
         $this->filter = ($this->filter === $type) ? 'all' : $type;
@@ -41,8 +41,21 @@ new class extends Component {
             ->selectRaw("
                 SUM(CASE WHEN tgl_submit IS NOT NULL THEN 1 ELSE 0 END) as total_submit,
                 SUM(CASE WHEN tgl_submit IS NULL THEN 1 ELSE 0 END) as total_belum_submit,
+
+                -- Menghitung yang semua 7 berkasnya = 1
                 SUM(CASE WHEN ver2=1 AND ver3=1 AND ver11=1 AND ver17=1 AND ver28=1 AND ver29=1 AND ver30=1 THEN 1 ELSE 0 END) as total_verif_lengkap,
-                SUM(CASE WHEN ver2!=1 OR ver3!=1 OR ver11!=1 OR ver17!=1 OR ver28!=1 OR ver29!=1 OR ver30!=1 THEN 1 ELSE 0 END) as total_verif_belum_lengkap,
+
+                -- Jika tidak semuanya 1 (mencakup NULL), maka belum lengkap
+                SUM(CASE WHEN ver2=1 AND ver3=1 AND ver11=1 AND ver17=1 AND ver28=1 AND ver29=1 AND ver30=1 THEN 0 ELSE 1 END) as total_verif_belum_lengkap,
+
+                -- STATISTIK BARU UNTUK MOOC & SKP
+                SUM(CASE WHEN ver28=1 THEN 1 ELSE 0 END) as total_mooc_diverif,
+                SUM(CASE WHEN ver29=1 THEN 1 ELSE 0 END) as total_skp_diverif,
+
+                -- STATISTIK BELUM VALID MOOC & SKP
+                SUM(CASE WHEN ver28=1 THEN 0 ELSE 1 END) as total_mooc_belum_diverif,
+                SUM(CASE WHEN ver29=1 THEN 0 ELSE 1 END) as total_skp_belum_diverif,
+
                 SUM(
                     (CASE WHEN ver2=1 THEN 1 ELSE 0 END) +
                     (CASE WHEN ver3=1 THEN 1 ELSE 0 END) +
@@ -52,15 +65,18 @@ new class extends Component {
                     (CASE WHEN ver29=1 THEN 1 ELSE 0 END) +
                     (CASE WHEN ver30=1 THEN 1 ELSE 0 END)
                 ) as total_berkas_diverif,
+
+                -- Mengubah != 1 menjadi logika 'Selain 1' untuk menangkap data NULL
                 SUM(
-                    (CASE WHEN ver2!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver3!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver11!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver17!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver28!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver29!=1 THEN 1 ELSE 0 END) +
-                    (CASE WHEN ver30!=1 THEN 1 ELSE 0 END)
+                    (CASE WHEN ver2=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver3=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver11=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver17=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver28=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver29=1 THEN 0 ELSE 1 END) +
+                    (CASE WHEN ver30=1 THEN 0 ELSE 1 END)
                 ) as total_berkas_belum_diverif,
+
                 SUM(
                     (CASE WHEN cat2 IS NOT NULL AND cat2 != '' THEN 1 ELSE 0 END) +
                     (CASE WHEN cat3 IS NOT NULL AND cat3 != '' THEN 1 ELSE 0 END) +
@@ -131,6 +147,18 @@ new class extends Component {
                             ->orWhere(fn($sub) => $sub->whereNotNull('tbpppk.cat29')->where('tbpppk.cat29', '!=', ''))
                             ->orWhere(fn($sub) => $sub->whereNotNull('tbpppk.cat30')->where('tbpppk.cat30', '!=', ''));
                     });
+                } elseif ($this->filter === 'mooc_valid') {
+                    $query->where('tbpppk.ver28', 1);
+                } elseif ($this->filter === 'mooc_belum_valid') {
+                    $query->where(function($q) {
+                        $q->where('tbpppk.ver28', '!=', 1)->orWhereNull('tbpppk.ver28');
+                    });
+                } elseif ($this->filter === 'skp_valid') {
+                    $query->where('tbpppk.ver29', 1);
+                } elseif ($this->filter === 'skp_belum_valid') {
+                    $query->where(function($q) {
+                        $q->where('tbpppk.ver29', '!=', 1)->orWhereNull('tbpppk.ver29');
+                    });
                 }
             })
             ->paginate(10);
@@ -174,7 +202,7 @@ new class extends Component {
         </x-slot:actions>
     </x-header>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
 
         <x-stat
                 title="Target Submit"
@@ -222,6 +250,36 @@ new class extends Component {
         </x-stat>
 
         <x-stat
+                title="MOOC Tervalidasi"
+                value="{{ number_format($stats->total_mooc_diverif ?? 0) }}"
+                icon="o-academic-cap"
+                class="cursor-pointer hover:shadow-md transition-all {{ $filter === 'mooc_valid' ? 'ring-2 ring-indigo-500 shadow-md' : '' }}"
+                wire:click="setFilter('mooc_valid')">
+            <x-slot:description>
+                <div class="mt-1 pt-1 border-t border-indigo-200" wire:click.stop="setFilter('mooc_belum_valid')">
+                    <span class="text-xs font-semibold hover:text-indigo-700 hover:underline {{ $filter === 'mooc_belum_valid' ? 'text-indigo-700 underline' : 'text-gray-500' }}">
+                        Lihat Belum Valid: {{ number_format($stats->total_mooc_belum_diverif ?? 0) }}
+                    </span>
+                </div>
+            </x-slot:description>
+        </x-stat>
+
+        <x-stat
+                title="SKP Tervalidasi"
+                value="{{ number_format($stats->total_skp_diverif ?? 0) }}"
+                icon="o-clipboard-document-check"
+                class="cursor-pointer hover:shadow-md transition-all {{ $filter === 'skp_valid' ? 'ring-2 ring-purple-500 shadow-md' : '' }}"
+                wire:click="setFilter('skp_valid')">
+            <x-slot:description>
+                <div class="mt-1 pt-1 border-t border-purple-200" wire:click.stop="setFilter('skp_belum_valid')">
+                    <span class="text-xs font-semibold hover:text-purple-700 hover:underline {{ $filter === 'skp_belum_valid' ? 'text-purple-700 underline' : 'text-gray-500' }}">
+                        Lihat Belum Valid: {{ number_format($stats->total_skp_belum_diverif ?? 0) }}
+                    </span>
+                </div>
+            </x-slot:description>
+        </x-stat>
+
+        <x-stat
                 title="Total Berkas Revisi"
                 value="{{ number_format($stats->total_berkas_revisi ?? 0) }}"
                 icon="o-pencil-square"
@@ -229,7 +287,7 @@ new class extends Component {
                 wire:click="setFilter('ada_catatan')">
             <x-slot:description>
                 <div class="mt-1 text-xs text-gray-500 pt-1 border-t border-orange-200">
-                    Menampilkan yang memiliki catatan
+                    Data yang memiliki catatan
                 </div>
             </x-slot:description>
         </x-stat>
