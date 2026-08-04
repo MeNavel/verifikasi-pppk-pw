@@ -46,7 +46,7 @@ new class extends Component {
         // Ambil NIP yang belum lengkap verifikasinya
         $this->pendingNips = DB::connection('kantor')->table('tbpppk')
             ->whereIn('nip', $targetNips)
-//            ->whereNotNull('tgl_submit')
+            ->whereNotNull('tgl_submit')
             ->where(function ($q) {
                 $q->where('ver2', '!=', 1)->orWhereNull('ver2')
                     ->orWhere('ver3', '!=', 1)->orWhereNull('ver3')
