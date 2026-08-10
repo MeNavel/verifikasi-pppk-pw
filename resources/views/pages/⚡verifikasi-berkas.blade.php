@@ -8,20 +8,18 @@ use Mary\Traits\Toast;
 new class extends Component {
     use Toast;
 
-    public array $pendingNips = []; // Menyimpan NIP yang butuh diverifikasi
+    public array $pendingNips = [];
     public int $currentPegawaiIndex = 0;
     public ?Pppk $pegawai = null;
 
-    // Properti untuk Pencarian NIP Spesifik
     public string $searchNip = '';
-
-    // --- TAMBAHAN PROPERTI FILTER OPD ---
     public string $selectedOpd = '';
 
-    // Silakan lengkapi array ini sesuai dengan angka (kode_satuan_kerja) dan nama OPD yang ada di gambar Anda
     public array $opdOptions = [
         ['id' => '67', 'name' => 'Dinas Kepemudaan dan Olahraga, Kebudayaan dan Pariwisata'],
         ['id' => '27', 'name' => 'Dinas Perpustakaan dan Kearsipan'],
+        ['id' => '23', 'name' => 'Dinas Pendidikan'],
+        ['id' => '68', 'name' => 'Dinas Kesehatan, Pengendalian Pendudukan dan Keluarga Berencana'],
         ['id' => '2310', 'name' => 'Dinas Pendidikan Kec. Bangsalsari'],
         ['id' => '2311', 'name' => 'Dinas Pendidikan Kec. Gumukmas'],
         ['id' => '2328', 'name' => 'Dinas Pendidikan Kec. Sukorambi'],
@@ -47,8 +45,6 @@ new class extends Component {
         'berkas3'  => ['label' => 'Transkrip Nilai', 'ver' => 'ver3', 'cat' => 'cat3', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas11' => ['label' => 'Kartu Keluarga (KK)', 'ver' => 'ver11', 'cat' => 'cat11', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas17' => ['label' => 'SK PPPK Paruh Waktu', 'ver' => 'ver17', 'cat' => 'cat17', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
-        // 'berkas28' => ['label' => 'Sertifikat MOOC', 'ver' => 'ver28', 'cat' => 'cat28', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
-        // 'berkas29' => ['label' => 'Dokumen SKP', 'ver' => 'ver29', 'cat' => 'cat29', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas30' => ['label' => 'Suket Kesehatan', 'ver' => 'ver30', 'cat' => 'cat30', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca', 'Tidak ada keterangan Sehat atau Tidak Sehat', 'Tidak berasal dari faskes pemerintah', 'Tidak ada TTD atau stempel basah dokter pemeriksa', 'Tanggal surat kesehatan sebelum bulan Agustus 2026', 'Tidak ada nomor dan/atau tanggal surat']],
     ];
 
@@ -66,42 +62,44 @@ new class extends Component {
             $targetNips = ['KOSONG'];
         }
 
-        // 1. Mulai Query dengan JOIN untuk kebutuhan Filter OPD
         $query = DB::connection('kantor')->table('tbpppk')
             ->select('tbpppk.nip')
             ->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
             ->join('satuan_kerja', 'v_pegawai_lengkap.kodesatker', '=', 'satuan_kerja.kode_satuan_kerja')
             ->whereIn('tbpppk.nip', $targetNips)
-            ->whereNotNull('tbpppk.tgl_submit'); // LOGIKA LAMA: Harus sudah submit
+            ->whereNotNull('tbpppk.tgl_submit');
 
-        // 2. FILTER: Pencarian NIP Spesifik
         if (!empty($this->searchNip)) {
             $query->where('tbpppk.nip', 'like', '%' . $this->searchNip . '%');
         }
 
-        // 3. FILTER BARU: Berdasarkan OPD (Mencocokkan kode atau parent_kode dari dropdown gambar)
+        // --- PERBAIKAN LOGIKA FILTER OPD ---
         if (!empty($this->selectedOpd)) {
             $query->where(function ($q) {
+                // 1. Pengecekan default (sama persis)
                 $q->where('satuan_kerja.kode_satuan_kerja', $this->selectedOpd)
                     ->orWhere('satuan_kerja.parent_kode', $this->selectedOpd);
+
+                // 2. Jika OPD adalah Dinas Pendidikan (23) atau Dinas Kesehatan (68)
+                // Tangkap semua turunan kodenya dengan pola awalan (contoh: '23%')
+                if ($this->selectedOpd === '23' || $this->selectedOpd === '68') {
+                    $q->orWhere('satuan_kerja.kode_satuan_kerja', 'like', $this->selectedOpd . '%')
+                        ->orWhere('satuan_kerja.parent_kode', 'like', $this->selectedOpd . '%');
+                }
             });
         }
+        // ------------------------------------
 
-        // 4. LOGIKA LAMA: Ambil yang status verifikasinya selain 1 (termasuk NULL/kosong)
         $query->where(function ($q) {
-            $q->where(function($sub) { $sub->where('ver2', '!=', 1)->orWhereNull('ver2'); })
-                ->orWhere(function($sub) { $sub->where('ver3', '!=', 1)->orWhereNull('ver3'); })
-                ->orWhere(function($sub) { $sub->where('ver11', '!=', 1)->orWhereNull('ver11'); })
-                ->orWhere(function($sub) { $sub->where('ver17', '!=', 1)->orWhereNull('ver17'); })
-                ->orWhere(function($sub) { $sub->where('ver28', '!=', 1)->orWhereNull('ver28'); })
-                ->orWhere(function($sub) { $sub->where('ver29', '!=', 1)->orWhereNull('ver29'); })
-                ->orWhere(function($sub) { $sub->where('ver30', '!=', 1)->orWhereNull('ver30'); });
+            foreach ($this->fileConfig as $config) {
+                $verCol = $config['ver'];
+                $q->orWhere(function($sub) use ($verCol) {
+                    $sub->where($verCol, '!=', 1)->orWhereNull($verCol);
+                });
+            }
         });
 
-        // Simpan hasil ke array pendingNips
-        $this->pendingNips = $query->pluck('tbpppk.nip')->toArray();
-
-        // Reset indeks pegawai yang sedang dibuka
+        $this->pendingNips = $query->distinct()->pluck('tbpppk.nip')->toArray();
         $this->currentPegawaiIndex = 0;
         $this->loadCurrentPegawai();
     }
@@ -131,15 +129,12 @@ new class extends Component {
             $verCol = $config['ver'];
             $statusVer = $this->pegawai->$verCol;
 
-            // Hanya masukkan file yang statusnya SELAIN 1 (yang belum diapprove)
-            // Kita juga mengecek agar file-nya memang sudah diupload (!empty)
             if ($statusVer != 1 && !empty($this->pegawai->$fileKey)) {
                 $this->availableFiles[] = $fileKey;
             }
         }
     }
 
-    // FUNGSI BARU: Pencarian NIP Spesifik
     public function cariNip(): void
     {
         $nipClean = trim($this->searchNip);
@@ -149,10 +144,19 @@ new class extends Component {
             return;
         }
 
-        $pegawaiCari = Pppk::on('kantor')->where('nip', $nipClean)->first();
+        $pegawaiCari = Pppk::on('kantor')
+            ->where('nip', $nipClean)
+            ->whereNotNull('tgl_submit')
+            ->first();
 
         if (!$pegawaiCari) {
-            $this->error("NIP $nipClean tidak ditemukan di database.");
+            $cekAda = Pppk::on('kantor')->where('nip', $nipClean)->exists();
+
+            if ($cekAda) {
+                $this->error("NIP $nipClean ditemukan, tetapi statusnya BELUM SUBMIT atau sedang DIREVISI.");
+            } else {
+                $this->error("NIP $nipClean tidak ditemukan di database.");
+            }
             return;
         }
 
@@ -177,7 +181,7 @@ new class extends Component {
         $catCol = $config['cat'];
 
         $this->pegawai->$verCol = 1;
-        $this->pegawai->$catCol = null; // Hapus catatan jika diapprove
+        $this->pegawai->$catCol = null;
         $this->pegawai->save();
 
         $this->success("{$config['label']} disetujui!");
@@ -206,16 +210,16 @@ new class extends Component {
 
     public function nextFileOrPegawai(): void
     {
-        // Re-check available files untuk pegawai saat ini
-        $this->setupAvailableFiles();
+        unset($this->availableFiles[$this->currentFileIndex]);
+        $this->availableFiles = array_values($this->availableFiles);
 
-        // Jika semua berkas pegawai ini sudah tuntas, lanjut ke pegawai berikutnya
+        if ($this->currentFileIndex >= count($this->availableFiles)) {
+            $this->currentFileIndex = 0;
+        }
+
         if (empty($this->availableFiles)) {
+            $this->searchNip = '';
             $this->loadPendingNips();
-            if ($this->currentPegawaiIndex >= count($this->pendingNips)) {
-                $this->currentPegawaiIndex = 0;
-            }
-            $this->loadCurrentPegawai();
         }
     }
 
@@ -311,7 +315,7 @@ new class extends Component {
                 @endif
             </div>
 
-            <div class="w-[22rem] lg:w-96 border-l border-base-300 flex flex-col shrink-0 h-full shadow-2xl z-10">
+            <div class="w-88 lg:w-96 border-l border-base-300 flex flex-col shrink-0 h-full shadow-2xl z-10">
 
                 <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
 
@@ -334,7 +338,7 @@ new class extends Component {
                         <x-badge value="{{ $currentFileIndex + 1 }} / {{ count($availableFiles) }}" class="badge-primary badge-sm font-mono" />
                     </div>
 
-                    <button wire:click="approve" wire:loading.attr="disabled" class="btn btn-success w-full min-h-[3.5rem] h-auto text-white text-base font-extrabold shadow-md hover:scale-[1.02] transition-transform">
+                    <button wire:click="approve" wire:loading.attr="disabled" class="btn btn-success w-full min-h-14 h-auto text-white text-base font-extrabold shadow-md hover:scale-[1.02] transition-transform">
                         <x-icon name="o-check-circle" class="w-7 h-7 mr-1" />
                         SETUJUI DOKUMEN
                     </button>
@@ -343,7 +347,7 @@ new class extends Component {
 
                     <div class="flex flex-col gap-2.5">
                         @foreach($config['opsi'] as $index => $opsi)
-                            <button wire:click="tolakDenganCatatan({{ $index }})" wire:loading.attr="disabled" class="btn btn-outline btn-error h-auto min-h-[3rem] py-2 px-4 justify-start text-left text-sm hover:scale-[1.01] transition-transform border-base-300 hover:border-error bg-base-100 shadow-sm">
+                            <button wire:click="tolakDenganCatatan({{ $index }})" wire:loading.attr="disabled" class="btn btn-outline btn-error h-auto min-h-12 py-2 px-4 justify-start text-left text-sm hover:scale-[1.01] transition-transform border-base-300 hover:border-error bg-base-100 shadow-sm">
                                 <x-icon name="o-x-circle" class="w-5 h-5 mr-2 shrink-0" />
                                 <span class="leading-snug">{{ $opsi }}</span>
                             </button>
