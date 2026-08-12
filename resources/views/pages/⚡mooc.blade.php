@@ -26,60 +26,52 @@ new class extends Component {
         ['id' => '59', 'name' => 'Kecamatan Sumberbaru'],
     ];
 
-    public array $availableFiles = [];
-    public int $currentFileIndex = 0;
-
-    public array $fileConfig = [
-        'berkas28'  => ['label' => 'MOOC', 'ver' => 'ver28', 'cat' => 'cat28', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca', 'Dokumen tidak lengkap', 'Tidak ada TTE Elektronik']],
+    // Opsi penolakan khusus MOOC
+    public array $opsiTolak = [
+        'Dokumen tidak sesuai',
+        'Dokumen tidak terbaca',
+        'Dokumen tidak lengkap',
+        'Tidak ada TTD Elektronik',
     ];
 
     public function mount(): void
     {
         $this->loadPendingNips();
-        $this->loadCurrentPegawai();
     }
 
     public function loadPendingNips(): void
     {
         $targetNips = DB::table('target_nips')->pluck('nip')->toArray();
 
-        // 1. PENGHENTIAN DINI (EARLY EXIT)
-        // Jika antrean target_nips kosong, tidak perlu membebani database utama
         if (empty($targetNips)) {
-            $this->pendingNips = [];
-            $this->currentPegawaiIndex = 0;
-            $this->loadCurrentPegawai();
-            return;
+            $targetNips = ['KOSONG'];
         }
 
-        // 2. QUERY RINGAN
         $query = DB::connection('kantor')->table('tbpppk')
             ->select('tbpppk.nip')
+            ->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
+            ->join('satuan_kerja', 'v_pegawai_lengkap.kodesatker', '=', 'satuan_kerja.kode_satuan_kerja')
             ->whereIn('tbpppk.nip', $targetNips)
             ->whereNotNull('tbpppk.tgl_submit')
-            // Fokus validasi langsung ke status ver28 (MOOC) tanpa looping
             ->where(function ($q) {
-                $q->where('ver28', '!=', 1)->orWhereNull('ver28');
+                // Diubah ke ver28 untuk MOOC
+                $q->where('tbpppk.ver28', '!=', 1)->orWhereNull('tbpppk.ver28');
             });
 
         if (!empty($this->searchNip)) {
-            $query->where('tbpppk.nip', 'like', '%' . trim($this->searchNip) . '%');
+            $query->where('tbpppk.nip', 'like', '%' . $this->searchNip . '%');
         }
 
-        // 3. JOIN KONDISIONAL (LAZY JOIN)
-        // Join tabel yang berat hanya dieksekusi bila Anda menggunakan filter OPD
         if (!empty($this->selectedOpd)) {
-            $query->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
-                ->join('satuan_kerja', 'v_pegawai_lengkap.kodesatker', '=', 'satuan_kerja.kode_satuan_kerja')
-                ->where(function ($q) {
-                    $q->where('satuan_kerja.kode_satuan_kerja', $this->selectedOpd)
-                        ->orWhere('satuan_kerja.parent_kode', $this->selectedOpd);
+            $query->where(function ($q) {
+                $q->where('satuan_kerja.kode_satuan_kerja', $this->selectedOpd)
+                    ->orWhere('satuan_kerja.parent_kode', $this->selectedOpd);
 
-                    if ($this->selectedOpd === '23' || $this->selectedOpd === '68') {
-                        $q->orWhere('satuan_kerja.kode_satuan_kerja', 'like', $this->selectedOpd . '%')
-                            ->orWhere('satuan_kerja.parent_kode', 'like', $this->selectedOpd . '%');
-                    }
-                });
+                if ($this->selectedOpd === '23' || $this->selectedOpd === '68') {
+                    $q->orWhere('satuan_kerja.kode_satuan_kerja', 'like', $this->selectedOpd . '%')
+                        ->orWhere('satuan_kerja.parent_kode', 'like', $this->selectedOpd . '%');
+                }
+            });
         }
 
         $this->pendingNips = $query->distinct()->pluck('tbpppk.nip')->toArray();
@@ -91,28 +83,11 @@ new class extends Component {
     {
         if (empty($this->pendingNips) || !isset($this->pendingNips[$this->currentPegawaiIndex])) {
             $this->pegawai = null;
-            $this->availableFiles = [];
             return;
         }
 
         $nip = $this->pendingNips[$this->currentPegawaiIndex];
         $this->pegawai = Pppk::on('kantor')->where('nip', $nip)->first();
-
-        $this->setupAvailableFiles();
-    }
-
-    public function setupAvailableFiles(): void
-    {
-        $this->availableFiles = [];
-        $this->currentFileIndex = 0;
-
-        if (!$this->pegawai) return;
-
-        // 4. VALIDASI BERKAS TANPA LOOPING
-        // Langsung tembak pada kolom ver28 dan berkas28
-        if ($this->pegawai->ver28 != 1 && !empty($this->pegawai->berkas28)) {
-            $this->availableFiles[] = 'berkas28';
-        }
     }
 
     public function cariNip(): void
@@ -131,20 +106,17 @@ new class extends Component {
 
         if (!$pegawaiCari) {
             $cekAda = Pppk::on('kantor')->where('nip', $nipClean)->exists();
-
-            if ($cekAda) {
-                $this->error("NIP $nipClean ditemukan, tetapi statusnya BELUM SUBMIT atau sedang DIREVISI.");
-            } else {
-                $this->error("NIP $nipClean tidak ditemukan di database.");
-            }
+            $this->error($cekAda
+                ? "NIP $nipClean ditemukan, tetapi statusnya BELUM SUBMIT atau sedang DIREVISI."
+                : "NIP $nipClean tidak ditemukan di database.");
             return;
         }
 
         $this->pegawai = $pegawaiCari;
-        $this->setupAvailableFiles();
 
-        if (empty($this->availableFiles)) {
-            $this->info("NIP $nipClean sudah terverifikasi lengkap semua berkasnya!");
+        // Diubah ke ver28
+        if ($pegawaiCari->ver28 == 1) {
+            $this->info("NIP $nipClean sudah terverifikasi Sertifikat MOOC-nya!");
         } else {
             $this->success("Menampilkan data verifikasi untuk NIP $nipClean.");
         }
@@ -152,55 +124,44 @@ new class extends Component {
 
     public function approve(): void
     {
-        if (!$this->pegawai || empty($this->availableFiles)) return;
+        if (!$this->pegawai) return;
 
-        $currentFile = $this->availableFiles[$this->currentFileIndex];
-        $config = $this->fileConfig[$currentFile];
-
-        $verCol = $config['ver'];
-        $catCol = $config['cat'];
-
-        $this->pegawai->$verCol = 1;
-        $this->pegawai->$catCol = null;
+        // Diubah ke ver28 dan cat28
+        $this->pegawai->ver28 = 1;
+        $this->pegawai->cat28 = null;
         $this->pegawai->save();
 
-        $this->success("{$config['label']} disetujui!");
-        $this->nextFileOrPegawai();
+        $this->success('Sertifikat MOOC disetujui!');
+        $this->afterAction();
     }
 
     public function tolakDenganCatatan(int $opsiIndex): void
     {
-        if (!$this->pegawai || empty($this->availableFiles)) return;
+        if (!$this->pegawai) return;
 
-        $currentFile = $this->availableFiles[$this->currentFileIndex];
-        $config = $this->fileConfig[$currentFile];
+        $catatanText = $this->opsiTolak[$opsiIndex] ?? 'Dokumen tidak sesuai';
 
-        $verCol = $config['ver'];
-        $catCol = $config['cat'];
-        $catatanText = $config['opsi'][$opsiIndex] ?? 'Dokumen tidak sesuai';
-
-        $this->pegawai->$verCol = 0;
-        $this->pegawai->$catCol = $catatanText;
+        // Diubah ke ver28 dan cat28
+        $this->pegawai->ver28 = 0;
+        $this->pegawai->cat28 = $catatanText;
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        $this->warning("{$config['label']} ditolak dengan catatan: $catatanText");
-        $this->nextFileOrPegawai();
+        $this->warning("MOOC ditolak dengan catatan: $catatanText");
+        $this->afterAction();
     }
 
-    public function nextFileOrPegawai(): void
+    private function afterAction(): void
     {
-        unset($this->availableFiles[$this->currentFileIndex]);
-        $this->availableFiles = array_values($this->availableFiles);
+        unset($this->pendingNips[$this->currentPegawaiIndex]);
+        $this->pendingNips = array_values($this->pendingNips);
 
-        if ($this->currentFileIndex >= count($this->availableFiles)) {
-            $this->currentFileIndex = 0;
+        if ($this->currentPegawaiIndex >= count($this->pendingNips)) {
+            $this->currentPegawaiIndex = 0;
         }
 
-        if (empty($this->availableFiles)) {
-            $this->searchNip = '';
-            $this->loadPendingNips();
-        }
+        $this->searchNip = '';
+        $this->loadCurrentPegawai();
     }
 
     public function nextPegawai(): void
@@ -218,14 +179,14 @@ new class extends Component {
             $this->loadCurrentPegawai();
         }
     }
-}; ?>
+};
+?>
 
 <div class="flex flex-col h-[calc(100vh-40px)] -mx-4 -mt-4 overflow-hidden bg-base-200">
 
-    {{-- HEADER + PROGRESS INDICATOR --}}
     <x-header
             title="Verifikasi Berkas PPPK PW"
-            subtitle="MOOC"
+            subtitle="Sertifikat MOOC"
             size="text-lg"
             separator
             progress-indicator="loadPendingNips,cariNip,approve,tolakDenganCatatan,nextPegawai,prevPegawai"
@@ -283,26 +244,21 @@ new class extends Component {
         </x-slot:actions>
     </x-header>
 
-    {{-- KONTEN UTAMA (satu-satunya area yang boleh scroll) --}}
     <div class="flex-1 flex overflow-hidden">
 
-        @if($pegawai && !empty($availableFiles))
+        @if($pegawai)
             @php
-                $currentFileKey = $availableFiles[$currentFileIndex];
-                $config = $fileConfig[$currentFileKey];
-                $fileName = $pegawai->$currentFileKey;
-
-                $fileUrl = route('pdf.sftp.preview', [
-                    'username' => $pegawai->username,
-                    'filename' => $fileName
-                ]);
+                // Diubah ke berkas28
+                $fileUrl = $pegawai->berkas28
+                    ? route('pdf.sftp.preview', ['username' => $pegawai->username, 'filename' => $pegawai->berkas28])
+                    : null;
             @endphp
 
             <div
-                    wire:key="pdf-container-{{ $currentFileKey }}-{{ $pegawai->nip ?? 'kosong' }}"
+                    wire:key="pdf-container-{{ $pegawai->nip ?? 'kosong' }}"
                     class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner"
 
-                    x-data="pdfViewer('{{ $fileName ? $fileUrl : '' }}', '{{ $currentFileKey === 'berkas29' ? 'FitH' : 'Fit' }}')"
+                    x-data="pdfViewer('{{ $fileUrl }}')"
             >
                 {{-- LAYER 1: Overlay saat Livewire fetch data pegawai baru --}}
                 <div
@@ -314,7 +270,7 @@ new class extends Component {
                     <span class="text-sm text-neutral-content/70">Memuat data pegawai...</span>
                 </div>
 
-                @if($fileName)
+                @if($fileUrl)
                     {{-- LAYER 2: Overlay saat file PDF diunduh via VPN --}}
                     <div
                             x-show="iframeLoading"
@@ -336,7 +292,7 @@ new class extends Component {
                 @else
                     <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60 relative z-10">
                         <x-icon name="o-document-magnifying-glass" class="w-24 h-24" />
-                        <p class="text-xl font-medium tracking-wide">Berkas <span class="text-primary">{{ $config['label'] }}</span> tidak diunggah.</p>
+                        <p class="text-xl font-medium tracking-wide">Berkas <span class="text-primary">Sertifikat MOOC</span> tidak diunggah.</p>
                     </div>
                 @endif
             </div>
@@ -345,7 +301,10 @@ new class extends Component {
 
                 <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
 
-                    <div class="bg-base-200/50 p-4 rounded-2xl border border-base-300 shadow-sm">
+                    <div
+                            class="bg-base-200/50 p-4 rounded-2xl border border-base-300 shadow-sm"
+                            wire:key="identitas-{{ $pegawai->nip }}"
+                    >
                         <p class="font-extrabold text-lg leading-tight text-base-content mb-2">{{ $pegawai->nama ?? 'Pegawai' }}</p>
                         <div class="flex flex-col gap-1 text-sm font-mono text-base-content/80">
                             <span class="flex items-center gap-2"><x-icon name="o-identification" class="w-4 h-4 text-primary"/> {{ $pegawai->nip }}</span>
@@ -354,18 +313,8 @@ new class extends Component {
                         <div class="mt-3">
                             <x-badge value="Menunggu Verifikasi" class="badge-warning badge-sm font-semibold w-full py-3" />
                         </div>
+                        {{-- Hapus bagian kotak Triwulan 1 & 2 karena tidak dibutuhkan di MOOC --}}
                     </div>
-
-                    @if(count($availableFiles) > 1)
-                        <ul class="steps steps-horizontal w-full text-xs">
-                            @foreach($availableFiles as $i => $fKey)
-                                <li class="step {{ $i <= $currentFileIndex ? 'step-primary' : '' }} cursor-pointer"
-                                    wire:click="$set('currentFileIndex', {{ $i }})">
-                                    {{ $fileConfig[$fKey]['label'] }}
-                                </li>
-                            @endforeach
-                        </ul>
-                    @endif
 
                     <x-button
                             wire:click="approve"
@@ -378,7 +327,7 @@ new class extends Component {
                     <div class="divider text-xs font-bold text-base-content/40 my-0 uppercase tracking-wider">Tolak & Beri Catatan</div>
 
                     <div class="flex flex-col gap-2.5">
-                        @foreach($config['opsi'] as $index => $opsi)
+                        @foreach($opsiTolak as $index => $opsi)
                             <x-button
                                     wire:click="tolakDenganCatatan({{ $index }})"
                                     spinner="tolakDenganCatatan"
@@ -389,27 +338,6 @@ new class extends Component {
                         @endforeach
                     </div>
                 </div>
-
-                <div class="p-4 border-t border-base-300 bg-base-200/30">
-                    <div class="flex justify-between items-center">
-                        <span class="text-sm font-bold text-base-content/70">Navigasi Berkas:</span>
-                        <div class="join shadow-sm">
-                            <button
-                                    class="btn btn-sm join-item bg-base-100 border-base-300 hover:bg-base-200"
-                                    @if($currentFileIndex <= 0) disabled @endif
-                                    wire:click="$set('currentFileIndex', {{ max(0, $currentFileIndex - 1) }})">
-                                <x-icon name="o-arrow-left" class="w-4 h-4" /> Prev
-                            </button>
-                            <button
-                                    class="btn btn-sm join-item bg-base-100 border-base-300 hover:bg-base-200"
-                                    @if($currentFileIndex >= count($availableFiles) - 1) disabled @endif
-                                    wire:click="$set('currentFileIndex', {{ min(count($availableFiles) - 1, $currentFileIndex + 1) }})">
-                                Next <x-icon name="o-arrow-right" class="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
             </div>
 
         @else
