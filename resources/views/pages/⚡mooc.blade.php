@@ -299,6 +299,9 @@ new class extends Component {
             @endphp
 
             <div
+                    {{-- 1. PINDAHKAN wire:key KE SINI --}}
+                    {{-- Agar Alpine.js otomatis me-reset x-data ke true setiap kali pegawai atau file berubah --}}
+                    wire:key="pdf-container-{{ $currentFileKey }}-{{ $pegawai->nip ?? 'kosong' }}"
                     class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner"
                     x-data="{ iframeLoading: true }"
             >
@@ -320,18 +323,19 @@ new class extends Component {
                             class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-neutral"
                     >
                         <x-loading class="loading-lg text-primary" />
-                        <span class="text-sm text-neutral-content/70">Memuat dokumen...</span>
+                        <span class="text-sm text-neutral-content/70">Mengunduh dokumen PDF...</span>
                     </div>
 
                     <iframe
-                            src="{{ $fileUrl }}#toolbar=0&zoom=page-fit"
-                            class="w-full h-full border-0 rounded-tl-lg"
-                            wire:key="file-{{ $currentFileKey }}-{{ $pegawai->nip }}"
-                            x-init="iframeLoading = true"
+                            {{-- 2. UBAH PARAMETER VIEW --}}
+                            src="{{ $fileUrl }}#toolbar=0&view=Fit"
+                            class="w-full h-full border-0 rounded-tl-lg absolute inset-0 z-10"
+                            {{-- 3. HAPUS x-init --}}
                             @load="iframeLoading = false"
+                            title="Dokumen Pegawai"
                     ></iframe>
                 @else
-                    <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60">
+                    <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60 relative z-10">
                         <x-icon name="o-document-magnifying-glass" class="w-24 h-24" />
                         <p class="text-xl font-medium tracking-wide">Berkas <span class="text-primary">{{ $config['label'] }}</span> tidak diunggah.</p>
                     </div>
