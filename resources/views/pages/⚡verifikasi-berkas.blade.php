@@ -304,9 +304,38 @@ new class extends Component {
                 ]);
             @endphp
 
-            <div class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner">
+            <div
+                    class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner"
+                    x-data="{ iframeLoading: true }"
+            >
+                {{-- LAYER 1: overlay saat Livewire masih fetch data pegawai/berkas baru --}}
+                <div
+                        wire:loading.flex
+                        wire:target="nextPegawai,prevPegawai,loadPendingNips,cariNip,approve,tolakDenganCatatan"
+                        class="absolute inset-0 z-30 bg-neutral/90 hidden flex-col items-center justify-center gap-3"
+                >
+                    <x-loading class="loading-lg text-primary" />
+                    <span class="text-sm text-neutral-content/70">Memuat data pegawai...</span>
+                </div>
+
                 @if($fileName)
-                    <iframe src="{{ $fileUrl }}#toolbar=0&zoom=page-fit" class="w-full h-full border-0 rounded-tl-lg"></iframe>
+                    {{-- LAYER 2: overlay saat iframe/PDF-nya sendiri masih render --}}
+                    <div
+                            x-show="iframeLoading"
+                            x-transition.opacity
+                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-neutral"
+                    >
+                        <x-loading class="loading-lg text-primary" />
+                        <span class="text-sm text-neutral-content/70">Memuat dokumen...</span>
+                    </div>
+
+                    <iframe
+                            src="{{ $fileUrl }}#toolbar=0&zoom=page-fit"
+                            class="w-full h-full border-0 rounded-tl-lg"
+                            wire:key="file-{{ $currentFileKey }}-{{ $pegawai->nip }}"
+                            x-init="iframeLoading = true"
+                            @load="iframeLoading = false"
+                    ></iframe>
                 @else
                     <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60">
                         <x-icon name="o-document-magnifying-glass" class="w-24 h-24" />
