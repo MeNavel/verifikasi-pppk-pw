@@ -305,38 +305,10 @@ new class extends Component {
             @endphp
 
             <div
-                    {{-- wire:key memicu reset state Alpine setiap berganti pegawai/file --}}
                     wire:key="pdf-container-{{ $currentFileKey }}-{{ $pegawai->nip ?? 'kosong' }}"
                     class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner"
-                    x-data="{
-                                iframeLoading: true,
-                                pdfBlobUrl: null,
-                                async loadPdf(url) {
-                                    this.iframeLoading = true;
 
-                                    // Bersihkan Blob URL lama dari memori jika ada
-                                    if (this.pdfBlobUrl) {
-                                        URL.revokeObjectURL(this.pdfBlobUrl);
-                                        this.pdfBlobUrl = null;
-                                    }
-
-                                    try {
-                                        // Fetch file PDF secara penuh lewat VPN
-                                        const response = await fetch(url);
-                                        if (!response.ok) throw new Error('Gagal memuat PDF');
-
-                                        const blob = await response.blob();
-                                        // Buat Blob URL lokal
-                                        this.pdfBlobUrl = URL.createObjectURL(blob) + '#toolbar=0&view=Fit';
-                                    } catch (error) {
-                                        console.error('PDF Error:', error);
-                                    } finally {
-                                        // Overlay BARU HILANG setelah seluruh file PDF selesai diunduh
-                                        this.iframeLoading = false;
-                                    }
-                                }
-                            }"
-                    x-init="loadPdf('{{ $fileUrl }}')"
+                    x-data="pdfViewer('{{ $fileName ? $fileUrl : '' }}', '{{ $currentFileKey === 'berkas29' ? 'FitH' : 'Fit' }}')"
             >
                 {{-- LAYER 1: Overlay saat Livewire fetch data pegawai baru --}}
                 <div
@@ -349,11 +321,11 @@ new class extends Component {
                 </div>
 
                 @if($fileName)
-                    {{-- LAYER 2: Overlay saat file PDF diunduh --}}
+                    {{-- LAYER 2: Overlay saat file PDF diunduh via VPN --}}
                     <div
                             x-show="iframeLoading"
                             x-transition.opacity
-                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3"
+                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-neutral"
                     >
                         <x-loading class="loading-lg text-primary" />
                         <span class="text-sm text-neutral-content/70">Mengunduh dokumen PDF...</span>
@@ -452,3 +424,38 @@ new class extends Component {
 
     </div>
 </div>
+
+@script
+<script>
+    Alpine.data('pdfViewer', (url, viewMode = 'Fit') => ({
+        iframeLoading: true,
+        pdfBlobUrl: null,
+
+        async init() {
+            if (!url) {
+                this.iframeLoading = false;
+                return;
+            }
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Gagal memuat dokumen PDF');
+
+                const blob = await response.blob();
+
+                this.pdfBlobUrl = URL.createObjectURL(blob) + `#toolbar=0&view=${viewMode}`;
+            } catch (error) {
+                console.error('PDF Error:', error);
+            } finally {
+                this.iframeLoading = false;
+            }
+        },
+
+        destroy() {
+            if (this.pdfBlobUrl) {
+                URL.revokeObjectURL(this.pdfBlobUrl);
+            }
+        }
+    }));
+</script>
+@endscript
