@@ -349,11 +349,11 @@ new class extends Component {
                 </div>
 
                 @if($fileName)
-                    {{-- LAYER 2: Overlay saat file PDF diunduh via VPN --}}
+                    {{-- LAYER 2: Overlay saat file PDF diunduh --}}
                     <div
                             x-show="iframeLoading"
                             x-transition.opacity
-                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-neutral"
+                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3"
                     >
                         <x-loading class="loading-lg text-primary" />
                         <span class="text-sm text-neutral-content/70">Mengunduh dokumen PDF...</span>

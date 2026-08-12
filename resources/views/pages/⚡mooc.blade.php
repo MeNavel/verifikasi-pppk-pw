@@ -299,13 +299,40 @@ new class extends Component {
             @endphp
 
             <div
-                    {{-- 1. PINDAHKAN wire:key KE SINI --}}
-                    {{-- Agar Alpine.js otomatis me-reset x-data ke true setiap kali pegawai atau file berubah --}}
+                    {{-- wire:key memicu reset state Alpine setiap berganti pegawai/file --}}
                     wire:key="pdf-container-{{ $currentFileKey }}-{{ $pegawai->nip ?? 'kosong' }}"
                     class="flex-1 bg-neutral text-neutral-content flex flex-col h-full relative overflow-hidden shadow-inner"
-                    x-data="{ iframeLoading: true }"
+                    x-data="{
+                                iframeLoading: true,
+                                pdfBlobUrl: null,
+                                async loadPdf(url) {
+                                    this.iframeLoading = true;
+
+                                    // Bersihkan Blob URL lama dari memori jika ada
+                                    if (this.pdfBlobUrl) {
+                                        URL.revokeObjectURL(this.pdfBlobUrl);
+                                        this.pdfBlobUrl = null;
+                                    }
+
+                                    try {
+                                        // Fetch file PDF secara penuh lewat VPN
+                                        const response = await fetch(url);
+                                        if (!response.ok) throw new Error('Gagal memuat PDF');
+
+                                        const blob = await response.blob();
+                                        // Buat Blob URL lokal
+                                        this.pdfBlobUrl = URL.createObjectURL(blob) + '#toolbar=0&view=FitH';
+                                    } catch (error) {
+                                        console.error('PDF Error:', error);
+                                    } finally {
+                                        // Overlay BARU HILANG setelah seluruh file PDF selesai diunduh
+                                        this.iframeLoading = false;
+                                    }
+                                }
+                            }"
+                    x-init="loadPdf('{{ $fileUrl }}')"
             >
-                {{-- LAYER 1: overlay saat Livewire masih fetch data pegawai/berkas baru --}}
+                {{-- LAYER 1: Overlay saat Livewire fetch data pegawai baru --}}
                 <div
                         wire:loading.flex
                         wire:target="nextPegawai,prevPegawai,loadPendingNips,cariNip,approve,tolakDenganCatatan"
@@ -316,24 +343,24 @@ new class extends Component {
                 </div>
 
                 @if($fileName)
-                    {{-- LAYER 2: overlay saat iframe/PDF-nya sendiri masih render --}}
+                    {{-- LAYER 2: Overlay saat file PDF diunduh --}}
                     <div
                             x-show="iframeLoading"
                             x-transition.opacity
-                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-neutral"
+                            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3"
                     >
                         <x-loading class="loading-lg text-primary" />
                         <span class="text-sm text-neutral-content/70">Mengunduh dokumen PDF...</span>
                     </div>
 
-                    <iframe
-                            {{-- 2. UBAH PARAMETER VIEW --}}
-                            src="{{ $fileUrl }}#toolbar=0&view=Fit"
-                            class="w-full h-full border-0 rounded-tl-lg absolute inset-0 z-10"
-                            {{-- 3. HAPUS x-init --}}
-                            @load="iframeLoading = false"
-                            title="Dokumen Pegawai"
-                    ></iframe>
+                    {{-- Tampilkan Iframe HANYA setelah Blob URL siap --}}
+                    <template x-if="pdfBlobUrl">
+                        <iframe
+                                :src="pdfBlobUrl"
+                                class="w-full h-full border-0 rounded-tl-lg absolute inset-0 z-10"
+                                title="Dokumen Pegawai"
+                        ></iframe>
+                    </template>
                 @else
                     <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60 relative z-10">
                         <x-icon name="o-document-magnifying-glass" class="w-24 h-24" />
