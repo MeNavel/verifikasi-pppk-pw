@@ -5,7 +5,6 @@ use App\Models\Pppk;
 use Illuminate\Support\Facades\DB;
 use Mary\Traits\Toast;
 use Illuminate\Support\Facades\Log;
-use Kstmostofa\LaravelWhatsApp\Facades\WhatsApp;
 
 new class extends Component {
     use Toast;
@@ -240,7 +239,10 @@ new class extends Component {
 
             // Kirim WA dalam Try-Catch
             try {
-                WhatsApp::send($noHp, $pesan);
+                $response = Http::post('http://localhost:3000/send-message', [
+                    'number' => $noHp,
+                    'message' => $pesan,
+                ]);
                 $waSent = true;
             } catch (\Throwable $e) {
                 Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());

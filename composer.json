@@ -7,7 +7,6 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
-        "kstmostofa/laravel-whatsapp": "^1.0",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
         "league/flysystem-sftp-v3": "^3.33",
