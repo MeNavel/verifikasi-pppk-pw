@@ -4,6 +4,8 @@ use Livewire\Component;
 use App\Models\Pppk;
 use Illuminate\Support\Facades\DB;
 use Mary\Traits\Toast;
+use Illuminate\Support\Facades\Log;
+use Kstmostofa\LaravelWhatsApp\Facades\WhatsApp;
 
 new class extends Component {
     use Toast;
@@ -199,12 +201,60 @@ new class extends Component {
         $catCol = $config['cat'];
         $catatanText = $config['opsi'][$opsiIndex] ?? 'Dokumen tidak sesuai';
 
+        // 1. Update status di database
         $this->pegawai->$verCol = 0;
         $this->pegawai->$catCol = $catatanText;
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        $this->warning("{$config['label']} ditolak dengan catatan: $catatanText");
+        // 2. Proses Pengiriman WhatsApp
+        $targetNip = DB::table('target_nips')
+            ->where('nip', $this->pegawai->nip)
+            ->first();
+
+        $waSent = false;
+
+        if ($targetNip && !empty($targetNip->no_hp)) {
+            // Cleaning nomor HP (hanya ambil angka)
+            $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
+
+            // Format ke 62...
+            if (str_starts_with($noHp, '0')) {
+                $noHp = '62' . substr($noHp, 1);
+            }
+
+            // KUNCI WEB SIDECAR: Wajib diakhiri dengan @c.us
+            if (!str_ends_with($noHp, '@c.us')) {
+                $noHp .= '@c.us';
+            }
+
+            // Susun Template Pesan
+            $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
+            $labelBerkas = $config['label'] ?? 'Dokumen';
+
+            $pesan  = "Yth. *{$namaPegawai}*\n\n";
+            $pesan .= "Mohon maaf, dokumen *{$labelBerkas}* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
+            $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
+            $pesan .= "Silakan login ke portal aplikasi untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
+            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+
+            // Kirim WA dalam Try-Catch
+            try {
+                WhatsApp::send($noHp, $pesan);
+                $waSent = true;
+            } catch (\Throwable $e) {
+                Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());
+            }
+        }
+
+        // 3. Tampilkan Notifikasi Toast ke Verifikator
+        if ($waSent) {
+            $this->success("{$config['label']} ditolak & WA terkirim: $catatanText");
+        } else {
+            $this->warning("{$config['label']} ditolak (WA Gagal/No HP Kosong): $catatanText");
+        }
+
+        // 4. Lanjut ke dokumen atau pegawai selanjutnya
         $this->nextFileOrPegawai();
     }
 

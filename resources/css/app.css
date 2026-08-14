@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import '../../vendor/livewire/flux/dist/flux.css';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
@@ -37,4 +38,29 @@
 
 .mary-table-pagination button {
     @apply cursor-pointer
+}
+
+@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+@source '../../vendor/kstmostofa/laravel-whatsapp/resources/views/**/*.blade.php';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* WhatsApp brand tokens — only the wa-* namespace, NOT --font-sans (don't override your fonts) */
+@theme {
+    --color-wa-50:  #E8F8EF;
+    --color-wa-100: #C7F0D6;
+    --color-wa-200: #93E2AE;
+    --color-wa-300: #5DD487;
+    --color-wa-400: #38C56C;
+    --color-wa-500: #25D366;
+    --color-wa-600: #00A884;
+    --color-wa-700: #128C7E;
+    --color-wa-800: #075E54;
+    --color-wa-900: #054D44;
+    --color-wa-bubble-light: #D9FDD3;
+    --color-wa-bubble-dark:  #005C4B;
+    --color-wa-surface-light: #FFFFFF;
+    --color-wa-surface-dark:  #202C33;
+    --color-wa-canvas-light:  #F0F2F5;
+    --color-wa-canvas-dark:   #111B21;
 }
