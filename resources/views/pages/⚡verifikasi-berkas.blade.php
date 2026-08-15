@@ -224,7 +224,7 @@ new class extends Component {
             $pesan  = "Yth. *$namaPegawai*\n\n";
             $pesan .= "Mohon maaf, dokumen *$labelBerkas* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
             $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
-            $pesan .= "Silakan login ke portal aplikasi untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
+            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
             $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
 
             // Kirim WA dalam Try-Catch
