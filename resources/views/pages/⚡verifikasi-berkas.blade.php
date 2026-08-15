@@ -478,7 +478,7 @@ new class extends Component {
 
 @script
 <script>
-    Alpine.data('pdfViewer', (url, viewMode = 'Fit') => ({
+    Alpine.data('pdfViewer', (url, viewMode = 'FitH') => ({
         iframeLoading: true,
         pdfBlobUrl: null,
 
