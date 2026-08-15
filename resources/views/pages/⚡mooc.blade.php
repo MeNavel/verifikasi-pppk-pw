@@ -171,7 +171,7 @@ new class extends Component {
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
 
             $pesan  = "Yth. *$namaPegawai*\n\n";
-            $pesan .= "Mohon maaf, dokumen *MOOC* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
+            $pesan .= "Mohon maaf, dokumen *Sertifikat MOOC* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
             $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
             $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
             $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
@@ -191,9 +191,9 @@ new class extends Component {
 
         // 3. Tampilkan Notifikasi Toast ke Verifikator
         if ($waSent) {
-            $this->success("{$config['label']} ditolak & WA terkirim: $catatanText");
+            $this->success("Sertifikat MOOC ditolak & WA terkirim: $catatanText");
         } else {
-            $this->warning("{$config['label']} ditolak (WA Gagal/No HP Kosong): $catatanText");
+            $this->warning("Sertifikat MOOC ditolak (WA Gagal/No HP Kosong): $catatanText");
         }
 
         $this->warning("MOOC ditolak dengan catatan: $catatanText");
