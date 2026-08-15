@@ -42,8 +42,8 @@ new class extends Component {
     public int $currentFileIndex = 0;
 
     public array $fileConfig = [
-        'berkas2'  => ['label' => 'Ijazah', 'ver' => 'ver2', 'cat' => 'cat2', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
-        'berkas3'  => ['label' => 'Transkrip Nilai', 'ver' => 'ver3', 'cat' => 'cat3', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
+//        'berkas2'  => ['label' => 'Ijazah', 'ver' => 'ver2', 'cat' => 'cat2', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
+//        'berkas3'  => ['label' => 'Transkrip Nilai', 'ver' => 'ver3', 'cat' => 'cat3', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas11' => ['label' => 'Kartu Keluarga (KK)', 'ver' => 'ver11', 'cat' => 'cat11', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas17' => ['label' => 'SK PPPK Paruh Waktu', 'ver' => 'ver17', 'cat' => 'cat17', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca']],
         'berkas30' => ['label' => 'Suket Kesehatan', 'ver' => 'ver30', 'cat' => 'cat30', 'opsi' => ['Dokumen tidak sesuai', 'Dokumen tidak terbaca', 'Tidak ada keterangan Sehat atau Tidak Sehat', 'Tidak berasal dari faskes pemerintah', 'Tidak ada TTD atau stempel basah dokter pemeriksa', 'Tanggal surat kesehatan sebelum bulan Agustus 2026', 'Tidak ada nomor dan/atau tanggal surat']],
@@ -183,6 +183,14 @@ new class extends Component {
 
         $this->pegawai->$verCol = 1;
         $this->pegawai->$catCol = null;
+
+        if ($currentFile === 'berkas11') {
+            $this->pegawai->ver2 = 1;
+            $this->pegawai->cat2 = null;
+            $this->pegawai->ver3 = 1;
+            $this->pegawai->cat3 = null;
+        }
+
         $this->pegawai->save();
 
         $this->success("{$config['label']} disetujui!");
