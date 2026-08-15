@@ -196,7 +196,7 @@ new class extends Component {
             try {
                 // HTTP POST Manual ke Service Sidecar
                 $response = Http::post($baseUrl . '/send-message', [
-                    'number'  => $recipient,
+                    'number'  => $noHp,
                     'message' => $pesan,
                 ]);
 
