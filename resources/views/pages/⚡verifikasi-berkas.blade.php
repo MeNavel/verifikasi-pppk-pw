@@ -231,20 +231,21 @@ new class extends Component {
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
             $labelBerkas = $config['label'] ?? 'Dokumen';
 
-            $pesan  = "Yth. *{$namaPegawai}*\n\n";
-            $pesan .= "Mohon maaf, dokumen *{$labelBerkas}* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
+            $pesan  = "Yth. *$namaPegawai*\n\n";
+            $pesan .= "Mohon maaf, dokumen *$labelBerkas* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
             $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
             $pesan .= "Silakan login ke portal aplikasi untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
             $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
 
             // Kirim WA dalam Try-Catch
+            $baseUrl = config('services.whatsapp.url');
             try {
-                $response = Http::post('http://localhost:3000/send-message', [
+                $response = Http::post('{$baseUrl}/send-message', [
                     'number' => $noHp,
                     'message' => $pesan,
                 ]);
                 $waSent = true;
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());
             }
         }

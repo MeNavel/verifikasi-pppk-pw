@@ -17,6 +17,7 @@ new class extends Component {
 
     public string $searchNip = '';
     public string $selectedOpd = '';
+    public string $catatan = '';
 
     public array $opdOptions = [
         ['id' => '67', 'name' => 'Dinas Kepemudaan dan Olahraga, Kebudayaan dan Pariwisata'],
@@ -27,16 +28,6 @@ new class extends Component {
         ['id' => '40', 'name' => 'Kecamatan Gumukmas'],
         ['id' => '57', 'name' => 'Kecamatan Sukorambi'],
         ['id' => '59', 'name' => 'Kecamatan Sumberbaru'],
-    ];
-
-    // Opsi penolakan khusus SKP (tidak perlu lagi dibungkus fileConfig)
-    public array $opsiTolak = [
-        'Dokumen tidak sesuai',
-        'Dokumen tidak terbaca',
-        'Dokumen tidak lengkap',
-        'Tidak ada TTD pejabat penilai kinerja',
-        'Tidak ada TTD pegawai yang dinilai',
-        'Nilai tidak sesuai dengan sistem',
     ];
 
     public function mount(): void
@@ -105,14 +96,14 @@ new class extends Component {
         $nip = $this->pegawai->nip;
 
         $this->skpTriwulan = Cache::remember(
-            "skp_triwulan_{$nip}",
+            "skp_triwulan_$nip",
             now()->addMinutes(15),
             function () use ($nip) {
                 try {
                     $response = Http::withOptions(['verify' => false])
                         ->timeout(5)
                         ->retry(1, 200)
-                        ->get("https://skp-asn.jemberkab.go.id/api/get_skp_pppkpw_2026/{$nip}");
+                        ->get("https://skp-asn.jemberkab.go.id/api/get_skp_pppkpw_2026/$nip");
 
                     $data = $response->json();
 
@@ -120,7 +111,7 @@ new class extends Component {
                         'tw1' => $data[0]['predikat_kinerja_tw_1'] ?? '-',
                         'tw2' => $data[0]['predikat_kinerja_tw_2'] ?? '-',
                     ];
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     return ['tw1' => 'Gagal dimuat', 'tw2' => 'Gagal dimuat'];
                 }
             }
@@ -171,18 +162,67 @@ new class extends Component {
         $this->afterAction();
     }
 
-    public function tolakDenganCatatan(int $opsiIndex): void
+    public function tolakDenganCatatan(): void
     {
+        if (empty(trim($this->catatan))) {
+            $this->error('Harap isi alasan penolakan pada kolom catatan terlebih dahulu!');
+            return;
+        }
+
         if (!$this->pegawai) return;
 
-        $catatanText = $this->opsiTolak[$opsiIndex] ?? 'Dokumen tidak sesuai';
-
         $this->pegawai->ver29 = 0;
-        $this->pegawai->cat29 = $catatanText;
+        $this->pegawai->cat29 = $this->catatan;
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        $this->warning("SKP ditolak dengan catatan: $catatanText");
+        $target = DB::table('target_nips')
+            ->where('nip', $this->pegawai->nip)
+            ->first();
+
+        if ($target && !empty($target->no_hp)) {
+            $noHp = preg_replace('/[^0-9]/', '', $target->no_hp);
+
+            // Format nomor HP ke standar internasional (62)
+            if (str_starts_with($noHp, '0')) {
+                $noHp = '62' . substr($noHp, 1);
+            }
+
+            // Tambahkan suffix @c.us untuk Web Sidecar
+            $recipient = str_ends_with($noHp, '@c.us') ? $noHp : $noHp . '@c.us';
+
+            // Ambil Base URL Sidecar dari config/services.php atau .env
+            $baseUrl = config('services.whatsapp.url');
+            $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
+
+            $pesan  = "Yth. *$namaPegawai*\n\n";
+            $pesan .= "Mohon maaf, dokumen *SKP* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
+            $pesan .= "📌 *Catatan Verifikator:*\n_{$this->catatan}_\n\n";
+            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
+            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+
+            try {
+                // HTTP POST Manual ke Service Sidecar
+                $response = Http::timeout(5)->post("$baseUrl/send-message", [
+                    'number'  => $recipient,
+                    'message' => $pesan,
+                ]);
+
+                if ($response->successful()) {
+                    $this->success("Dokumen ditolak & notifikasi WA berhasil dikirim!");
+                } else {
+                    Log::warning("Gagal respon WA Sidecar: " . $response->body());
+                    $this->warning("Dokumen ditolak, tetapi notifikasi WA gagal dikirim.");
+                }
+            } catch (Exception $e) {
+                Log::error("Error HTTP POST WA Sidecar: " . $e->getMessage());
+                $this->warning("Dokumen ditolak, tetapi service WA Sidecar tidak merespons.");
+            }
+        } else {
+            $this->info("Dokumen ditolak (Nomor HP tidak ditemukan di target_nips).");
+        }
+
+        $this->catatan = '';
         $this->afterAction();
     }
 
@@ -228,7 +268,7 @@ new class extends Component {
             progress-indicator-class="progress-primary"
             class="px-5 pt-3 pb-0 shrink-0"
     >
-        <x-slot:middle class="!justify-end">
+        <x-slot:middle class="justify-end!">
             <div class="flex flex-wrap items-center gap-2">
                 <x-select
                         wire:model="selectedOpd"
@@ -326,7 +366,7 @@ new class extends Component {
                 @else
                     <div class="flex-1 flex items-center justify-center flex-col gap-4 opacity-60 relative z-10">
                         <x-icon name="o-document-magnifying-glass" class="w-24 h-24" />
-                        <p class="text-xl font-medium tracking-wide">Berkas <span class="text-primary">{{ $config['label'] }}</span> tidak diunggah.</p>
+                        <p class="text-xl font-medium tracking-wide">Berkas <span class="text-primary">SKP</span> tidak diunggah.</p>
                     </div>
                 @endif
             </div>
@@ -379,16 +419,28 @@ new class extends Component {
 
                     <div class="divider text-xs font-bold text-base-content/40 my-0 uppercase tracking-wider">Tolak & Beri Catatan</div>
 
-                    <div class="flex flex-col gap-2.5">
-                        @foreach($opsiTolak as $index => $opsi)
-                            <x-button
-                                    wire:click="tolakDenganCatatan({{ $index }})"
-                                    spinner="tolakDenganCatatan"
-                                    label="{{ $opsi }}"
-                                    icon="o-x-circle"
-                                    class="btn-outline btn-error h-auto min-h-12 py-2 px-4 justify-start text-left text-sm hover:scale-[1.01] transition-transform border-base-300 hover:border-error bg-base-100 shadow-sm"
-                            />
-                        @endforeach
+                    {{-- Area Penolakan yang lebih clean & rapi --}}
+                    <div class="p-4 bg-error/10 rounded-2xl border border-error/20 flex flex-col gap-3">
+
+                        <div class="flex items-center gap-2 text-error font-bold mb-1">
+                            <x-icon name="o-exclamation-triangle" class="w-5 h-5" />
+                            <span>Tolak & Revisi SKP</span>
+                        </div>
+
+                        <x-textarea
+                                wire:model="catatan"
+                                placeholder="Contoh: Dokumen terlalu buram / TTD tidak jelas..."
+                                rows="3"
+                                class="w-full textarea-error bg-base-100"
+                        />
+
+                        <x-button
+                                label="Kirim Penolakan"
+                                wire:click="tolakDenganCatatan()"
+                                spinner="tolakDenganCatatan"
+                                icon="o-paper-airplane"
+                                class="btn-error text-white w-full shadow-sm hover:scale-[1.02] transition-transform"
+                        />
                     </div>
                 </div>
             </div>

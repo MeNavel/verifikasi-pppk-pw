@@ -147,6 +147,55 @@ new class extends Component {
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
+        $targetNip = DB::table('target_nips')
+            ->where('nip', $this->pegawai->nip)
+            ->first();
+
+        $waSent = false;
+
+        if ($targetNip && !empty($targetNip->no_hp)) {
+            // Cleaning nomor HP (hanya ambil angka)
+            $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
+
+            // Format ke 62...
+            if (str_starts_with($noHp, '0')) {
+                $noHp = '62' . substr($noHp, 1);
+            }
+
+            // KUNCI WEB SIDECAR: Wajib diakhiri dengan @c.us
+            if (!str_ends_with($noHp, '@c.us')) {
+                $noHp .= '@c.us';
+            }
+
+            // Susun Template Pesan
+            $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
+
+            $pesan  = "Yth. *$namaPegawai*\n\n";
+            $pesan .= "Mohon maaf, dokumen *MOOC* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
+            $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
+            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
+            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+
+            // Kirim WA dalam Try-Catch
+            $baseUrl = config('services.whatsapp.url');
+            try {
+                $response = Http::post('{$baseUrl}/send-message', [
+                    'number' => $noHp,
+                    'message' => $pesan,
+                ]);
+                $waSent = true;
+            } catch (Throwable $e) {
+                Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());
+            }
+        }
+
+        // 3. Tampilkan Notifikasi Toast ke Verifikator
+        if ($waSent) {
+            $this->success("{$config['label']} ditolak & WA terkirim: $catatanText");
+        } else {
+            $this->warning("{$config['label']} ditolak (WA Gagal/No HP Kosong): $catatanText");
+        }
+
         $this->warning("MOOC ditolak dengan catatan: $catatanText");
         $this->afterAction();
     }
@@ -193,7 +242,7 @@ new class extends Component {
             progress-indicator-class="progress-primary"
             class="px-5 pt-3 pb-0 shrink-0"
     >
-        <x-slot:middle class="!justify-end">
+        <x-slot:middle class="justify-end!">
             <div class="flex flex-wrap items-center gap-2">
                 <x-select
                         wire:model="selectedOpd"
