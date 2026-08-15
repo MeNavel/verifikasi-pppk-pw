@@ -169,7 +169,7 @@ new class extends Component {
             // Kirim WA dalam Try-Catch
             $baseUrl = config('services.whatsapp.url');
             try {
-                $response = Http::post('{$baseUrl}/send-message', [
+                $response = Http::post($baseUrl . '/send-message', [
                     'number' => $noHp,
                     'message' => $pesan,
                 ]);

@@ -195,7 +195,7 @@ new class extends Component {
 
             try {
                 // HTTP POST Manual ke Service Sidecar
-                $response = Http::timeout(5)->post("$baseUrl/send-message", [
+                $response = Http::post($baseUrl . '/send-message', [
                     'number'  => $recipient,
                     'message' => $pesan,
                 ]);
