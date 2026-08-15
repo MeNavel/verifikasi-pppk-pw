@@ -186,7 +186,6 @@ new class extends Component {
             $this->warning("Sertifikat MOOC ditolak (WA Gagal/No HP Kosong): $catatanText");
         }
 
-        $this->warning("MOOC ditolak dengan catatan: $catatanText");
         $this->afterAction();
     }
 
