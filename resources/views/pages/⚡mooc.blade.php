@@ -145,7 +145,7 @@ new class extends Component {
         $this->pegawai->ver28 = 0;
         $this->pegawai->cat28 = $catatanText;
         $this->pegawai->tgl_submit = null;
-//        $this->pegawai->save();
+        $this->pegawai->save();
 
         $targetNip = DB::table('target_nips')
             ->where('nip', $this->pegawai->nip)
