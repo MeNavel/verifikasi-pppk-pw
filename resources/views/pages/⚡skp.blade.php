@@ -183,14 +183,6 @@ new class extends Component {
         if ($target && !empty($target->no_hp)) {
             $noHp = preg_replace('/[^0-9]/', '', $target->no_hp);
 
-            // Format nomor HP ke standar internasional (62)
-            if (str_starts_with($noHp, '0')) {
-                $noHp = '62' . substr($noHp, 1);
-            }
-
-            // Tambahkan suffix @c.us untuk Web Sidecar
-            $recipient = str_ends_with($noHp, '@c.us') ? $noHp : $noHp . '@c.us';
-
             // Ambil Base URL Sidecar dari config/services.php atau .env
             $baseUrl = config('services.whatsapp.url');
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';

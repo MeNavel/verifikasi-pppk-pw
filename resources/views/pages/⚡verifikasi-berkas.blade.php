@@ -217,16 +217,6 @@ new class extends Component {
             // Cleaning nomor HP (hanya ambil angka)
             $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
 
-            // Format ke 62...
-            if (str_starts_with($noHp, '0')) {
-                $noHp = '62' . substr($noHp, 1);
-            }
-
-            // KUNCI WEB SIDECAR: Wajib diakhiri dengan @c.us
-            if (!str_ends_with($noHp, '@c.us')) {
-                $noHp .= '@c.us';
-            }
-
             // Susun Template Pesan
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
             $labelBerkas = $config['label'] ?? 'Dokumen';

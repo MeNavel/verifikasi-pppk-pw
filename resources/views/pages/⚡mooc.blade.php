@@ -145,7 +145,7 @@ new class extends Component {
         $this->pegawai->ver28 = 0;
         $this->pegawai->cat28 = $catatanText;
         $this->pegawai->tgl_submit = null;
-        $this->pegawai->save();
+//        $this->pegawai->save();
 
         $targetNip = DB::table('target_nips')
             ->where('nip', $this->pegawai->nip)
@@ -156,16 +156,6 @@ new class extends Component {
         if ($targetNip && !empty($targetNip->no_hp)) {
             // Cleaning nomor HP (hanya ambil angka)
             $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
-
-            // Format ke 62...
-            if (str_starts_with($noHp, '0')) {
-                $noHp = '62' . substr($noHp, 1);
-            }
-
-            // KUNCI WEB SIDECAR: Wajib diakhiri dengan @c.us
-            if (!str_ends_with($noHp, '@c.us')) {
-                $noHp .= '@c.us';
-            }
 
             // Susun Template Pesan
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
