@@ -6,6 +6,7 @@ Route::livewire('/rekap', 'pages::rekap-verifikasi');
 Route::livewire('/mooc', 'pages::mooc');
 Route::livewire('/skp', 'pages::skp');
 Route::livewire('/import', 'pages::import-no_hp');
+Route::livewire('/bagus', 'pages::verifikasi-berkas-bagus');
 
 Route::get('/preview-pdf/{username}/{filename}', function ($username, $filename) {
     $disk = Storage::disk('sftp_kantor');
