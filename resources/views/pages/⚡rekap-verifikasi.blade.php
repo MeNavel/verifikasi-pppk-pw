@@ -3,6 +3,8 @@
 use Livewire\Component;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
+use Spatie\SimpleExcel\SimpleExcelWriter;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 new class extends Component {
     use WithPagination;
@@ -14,6 +16,7 @@ new class extends Component {
 
     // Filter OPD
     public string $opdFilter = '';
+    public string $submitFilter = '';
 
     // Filter 7 Jenis Berkas
     public string $f_ver2 = ''; // Ijazah
@@ -24,6 +27,12 @@ new class extends Component {
     public string $f_ver28 = ''; // MOOC
     public string $f_ver29 = ''; // SKP
 
+    // Filter: hanya pegawai yang punya minimal 1 catatan (revisi)
+    public bool $adaCatatanFilter = false;
+
+    // Kolom catatan yang dicek untuk filter "minimal 1 catatan"
+    private array $catatanColumns = ['cat2', 'cat3', 'cat11', 'cat17', 'cat28', 'cat29', 'cat30'];
+
     // Properti Modal Catatan Revisi
     public bool $modalCatatan = false;
     public string $judulCatatan = '';
@@ -31,13 +40,19 @@ new class extends Component {
 
     // Mapping jenis berkas -> kolom & label
     public array $jenisBerkasMap = [
-        'ijazah'    => ['cat' => 'cat2',  'label' => 'Ijazah'],
-        'transkrip' => ['cat' => 'cat3',  'label' => 'Transkrip'],
-        'ktpkk'     => ['cat' => 'cat11', 'label' => 'KK'],
-        'skpppk'    => ['cat' => 'cat17', 'label' => 'SK PPPK'],
-        'suket'     => ['cat' => 'cat30', 'label' => 'Suket Sehat'],
-        'mooc'      => ['cat' => 'cat28', 'label' => 'MOOC'],
-        'skp'       => ['cat' => 'cat29', 'label' => 'SKP'],
+        'ijazah' => ['cat' => 'cat2', 'label' => 'Ijazah'],
+        'transkrip' => ['cat' => 'cat3', 'label' => 'Transkrip'],
+        'ktpkk' => ['cat' => 'cat11', 'label' => 'KK'],
+        'skpppk' => ['cat' => 'cat17', 'label' => 'SK PPPK'],
+        'suket' => ['cat' => 'cat30', 'label' => 'Suket Sehat'],
+        'mooc' => ['cat' => 'cat28', 'label' => 'MOOC'],
+        'skp' => ['cat' => 'cat29', 'label' => 'SKP'],
+    ];
+
+    public array $submitFilterOptions = [
+        ['id' => '', 'name' => 'Total (Semua)'],
+        ['id' => 'sudah', 'name' => 'Sudah Submit'],
+        ['id' => 'belum', 'name' => 'Belum Submit'],
     ];
 
     // Pilihan Status di Dropdown Drawer
@@ -93,7 +108,7 @@ new class extends Component {
         }
 
         $this->judulCatatan = "Catatan {$map['label']} ($row->nama)";
-        $this->isiCatatan   = $row->{$map['cat']} ?? '';
+        $this->isiCatatan = $row->{$map['cat']} ?? '';
         $this->modalCatatan = true;
     }
 
@@ -101,10 +116,12 @@ new class extends Component {
     public function getIsFilteredProperty(): bool
     {
         return $this->opdFilter !== '' ||
+            $this->submitFilter !== '' ||
             $this->f_ver2 !== '' || $this->f_ver3 !== '' ||
             $this->f_ver11 !== '' || $this->f_ver17 !== '' ||
             $this->f_ver28 !== '' || $this->f_ver29 !== '' ||
-            $this->f_ver30 !== '';
+            $this->f_ver30 !== '' ||
+            $this->adaCatatanFilter;
     }
 
     public function applyFilter(): void
@@ -116,6 +133,7 @@ new class extends Component {
     public function resetFilter(): void
     {
         $this->opdFilter = '';
+        $this->submitFilter = ''; // TAMBAHAN
         $this->f_ver2 = '';
         $this->f_ver3 = '';
         $this->f_ver11 = '';
@@ -123,6 +141,7 @@ new class extends Component {
         $this->f_ver28 = '';
         $this->f_ver29 = '';
         $this->f_ver30 = '';
+        $this->adaCatatanFilter = false;
 
         $this->resetPage();
         $this->drawerFilter = false;
@@ -131,7 +150,9 @@ new class extends Component {
     public function with(): array
     {
         $targetNips = DB::table('target_nips')->pluck('nip')->toArray();
-        if (empty($targetNips)) { $targetNips = ['KOSONG']; }
+        if (empty($targetNips)) {
+            $targetNips = ['KOSONG'];
+        }
         $connection = 'kantor';
 
         // 1. QUERY STATISTIK
@@ -142,6 +163,13 @@ new class extends Component {
             $statsQuery->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
                 ->join('satuan_kerja as sk', 'v_pegawai_lengkap.kodesatker', '=', 'sk.kode_satuan_kerja')
                 ->where('sk.kode_satuan_kerja', 'like', $this->opdFilter . '%');
+        }
+
+        // TAMBAHAN
+        if ($this->submitFilter === 'sudah') {
+            $statsQuery->whereNotNull('tbpppk.tgl_submit');
+        } elseif ($this->submitFilter === 'belum') {
+            $statsQuery->whereNull('tbpppk.tgl_submit');
         }
 
         $stats = $statsQuery->selectRaw("
@@ -188,55 +216,8 @@ new class extends Component {
             ")
             ->first();
 
-        // 2. QUERY TABEL DATA
-        $data = DB::connection($connection)->table('tbpppk')
-            ->whereIn('tbpppk.nip', $targetNips)
-            ->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
-            ->join('satuan_kerja as sk', 'v_pegawai_lengkap.kodesatker', '=', 'sk.kode_satuan_kerja')
-            ->leftJoin('satuan_kerja as parent_sk', 'sk.parent_kode', '=', 'parent_sk.kode_satuan_kerja')
-            ->select(
-                'tbpppk.nip', 'tbpppk.nama',
-                'tbpppk.ver2', 'tbpppk.cat2', 'tbpppk.ver3', 'tbpppk.cat3',
-                'tbpppk.ver11', 'tbpppk.cat11', 'tbpppk.ver17', 'tbpppk.cat17',
-                'tbpppk.ver28', 'tbpppk.cat28', 'tbpppk.ver29', 'tbpppk.cat29',
-                'tbpppk.ver30', 'tbpppk.cat30',
-                'sk.satuan_kerja as nama_satker',
-                'parent_sk.satuan_kerja as nama_parent_satker'
-            )
-            ->when($this->search, function ($query) {
-                $query->where(function($q) {
-                    $q->where('tbpppk.nip', 'like', '%' . $this->search . '%')
-                        ->orWhere('tbpppk.nama', 'like', '%' . $this->search . '%');
-                });
-            })
-            ->when($this->opdFilter !== '', function ($query) {
-                $query->where('sk.kode_satuan_kerja', 'like', $this->opdFilter . '%');
-            });
-
-        // Terapkan Dinamis 7 Filter Berkas
-        $fileFilters = [
-            ['val' => $this->f_ver2, 'ver' => 'tbpppk.ver2', 'cat' => 'tbpppk.cat2'],
-            ['val' => $this->f_ver3, 'ver' => 'tbpppk.ver3', 'cat' => 'tbpppk.cat3'],
-            ['val' => $this->f_ver11, 'ver' => 'tbpppk.ver11', 'cat' => 'tbpppk.cat11'],
-            ['val' => $this->f_ver17, 'ver' => 'tbpppk.ver17', 'cat' => 'tbpppk.cat17'],
-            ['val' => $this->f_ver30, 'ver' => 'tbpppk.ver30', 'cat' => 'tbpppk.cat30'],
-            ['val' => $this->f_ver28, 'ver' => 'tbpppk.ver28', 'cat' => 'tbpppk.cat28'],
-            ['val' => $this->f_ver29, 'ver' => 'tbpppk.ver29', 'cat' => 'tbpppk.cat29'],
-        ];
-
-        foreach ($fileFilters as $f) {
-            if ($f['val'] === 'valid') {
-                $data->where($f['ver'], 1);
-            } elseif ($f['val'] === 'belum_valid') {
-                $data->where(function($q) use ($f) {
-                    $q->where($f['ver'], '!=', 1)->orWhereNull($f['ver']);
-                });
-            } elseif ($f['val'] === 'revisi') {
-                $data->whereNotNull($f['cat'])->where($f['cat'], '!=', '');
-            }
-        }
-
-        $data = $data->paginate(10);
+        // 2. QUERY TABEL DATA (query dasar + semua filter aktif, dipakai juga oleh export)
+        $data = $this->baseDataQuery()->paginate(10);
 
         $headers = [
             ['key' => 'pegawai', 'label' => 'NIP & Nama', 'class' => 'w-64'],
@@ -257,10 +238,128 @@ new class extends Component {
         ];
     }
 
+    // Query dasar tabel data: join + semua filter aktif (tanpa paginasi).
+    // Dipakai bersama oleh with() untuk tabel, dan downloadExcel() untuk export,
+    // supaya hasil yang di-download selalu sama persis dengan yang tampil di tabel.
+    private function baseDataQuery()
+    {
+        $targetNips = DB::table('target_nips')->pluck('nip')->toArray();
+        if (empty($targetNips)) {
+            $targetNips = ['KOSONG'];
+        }
+        $connection = 'kantor';
+
+        $query = DB::connection($connection)->table('tbpppk')
+            ->whereIn('tbpppk.nip', $targetNips)
+            ->join('v_pegawai_lengkap', 'tbpppk.nip', '=', 'v_pegawai_lengkap.nip')
+            ->join('satuan_kerja as sk', 'v_pegawai_lengkap.kodesatker', '=', 'sk.kode_satuan_kerja')
+            ->leftJoin('satuan_kerja as parent_sk', 'sk.parent_kode', '=', 'parent_sk.kode_satuan_kerja')
+            ->select(
+                'tbpppk.nip', 'tbpppk.nama',
+                'tbpppk.ver2', 'tbpppk.cat2', 'tbpppk.ver3', 'tbpppk.cat3',
+                'tbpppk.ver11', 'tbpppk.cat11', 'tbpppk.ver17', 'tbpppk.cat17',
+                'tbpppk.ver28', 'tbpppk.cat28', 'tbpppk.ver29', 'tbpppk.cat29',
+                'tbpppk.ver30', 'tbpppk.cat30',
+                'sk.satuan_kerja as nama_satker',
+                'parent_sk.satuan_kerja as nama_parent_satker'
+            )
+            ->when($this->search, function ($query) {
+                $query->where(function ($q) {
+                    $q->where('tbpppk.nip', 'like', '%' . $this->search . '%')
+                        ->orWhere('tbpppk.nama', 'like', '%' . $this->search . '%');
+                });
+            })
+            ->when($this->opdFilter !== '', function ($query) {
+                $query->where('sk.kode_satuan_kerja', 'like', $this->opdFilter . '%');
+            })
+            ->when($this->submitFilter === 'sudah', function ($query) {
+                $query->whereNotNull('tbpppk.tgl_submit');
+            })
+            ->when($this->submitFilter === 'belum', function ($query) {
+                $query->whereNull('tbpppk.tgl_submit');
+            })
+            ->when($this->adaCatatanFilter, function ($query) {
+                // Hanya pegawai yang punya isi catatan pada MINIMAL 1 dari 7 jenis berkas
+                $query->where(function ($q) {
+                    foreach ($this->catatanColumns as $cat) {
+                        $q->orWhere(function ($qq) use ($cat) {
+                            $qq->whereNotNull("tbpppk.$cat")->where("tbpppk.$cat", '!=', '');
+                        });
+                    }
+                });
+            });
+
+        // Terapkan Dinamis 7 Filter Berkas
+        $fileFilters = [
+            ['val' => $this->f_ver2, 'ver' => 'tbpppk.ver2', 'cat' => 'tbpppk.cat2'],
+            ['val' => $this->f_ver3, 'ver' => 'tbpppk.ver3', 'cat' => 'tbpppk.cat3'],
+            ['val' => $this->f_ver11, 'ver' => 'tbpppk.ver11', 'cat' => 'tbpppk.cat11'],
+            ['val' => $this->f_ver17, 'ver' => 'tbpppk.ver17', 'cat' => 'tbpppk.cat17'],
+            ['val' => $this->f_ver30, 'ver' => 'tbpppk.ver30', 'cat' => 'tbpppk.cat30'],
+            ['val' => $this->f_ver28, 'ver' => 'tbpppk.ver28', 'cat' => 'tbpppk.cat28'],
+            ['val' => $this->f_ver29, 'ver' => 'tbpppk.ver29', 'cat' => 'tbpppk.cat29'],
+        ];
+
+        foreach ($fileFilters as $f) {
+            if ($f['val'] === 'valid') {
+                $query->where($f['ver'], 1);
+            } elseif ($f['val'] === 'belum_valid') {
+                $query->where(function ($q) use ($f) {
+                    $q->where($f['ver'], '!=', 1)->orWhereNull($f['ver']);
+                });
+            } elseif ($f['val'] === 'revisi') {
+                $query->whereNotNull($f['cat'])->where($f['cat'], '!=', '');
+            }
+        }
+
+        return $query;
+    }
+
+    // Download hasil rekap (sesuai filter yang sedang aktif) ke Excel
+    public function downloadExcel(): BinaryFileResponse
+    {
+        $data = $this->baseDataQuery()->get();
+
+        $fileName = 'Rekap_Verifikasi_PPPK_' . date('Y-m-d_H-i-s') . '.xlsx';
+        $tempPath = storage_path('app/' . $fileName);
+
+        $writer = SimpleExcelWriter::create($tempPath);
+
+        foreach ($data as $row) {
+            $writer->addRow([
+                'NIP' => $row->nip,
+                'Nama' => $row->nama,
+                'Satuan Kerja' => $row->nama_satker,
+                'Status Ijazah' => $this->getBadge($row->ver2, $row->cat2)['text'],
+                'Catatan Ijazah' => $row->cat2,
+                'Status Transkrip' => $this->getBadge($row->ver3, $row->cat3)['text'],
+                'Catatan Transkrip' => $row->cat3,
+                'Status KTP/KK' => $this->getBadge($row->ver11, $row->cat11)['text'],
+                'Catatan KTP/KK' => $row->cat11,
+                'Status SK PPPK' => $this->getBadge($row->ver17, $row->cat17)['text'],
+                'Catatan SK PPPK' => $row->cat17,
+                'Status Suket Sehat' => $this->getBadge($row->ver30, $row->cat30)['text'],
+                'Catatan Suket Sehat' => $row->cat30,
+                'Status MOOC' => $this->getBadge($row->ver28, $row->cat28)['text'],
+                'Catatan MOOC' => $row->cat28,
+                'Status SKP' => $this->getBadge($row->ver29, $row->cat29)['text'],
+                'Catatan SKP' => $row->cat29,
+            ]);
+        }
+
+        $writer->close();
+
+        return response()->download($tempPath)->deleteFileAfterSend();
+    }
+
     private function getBadge(?string $ver, ?string $cat): array
     {
-        if ($ver === '1') { return ['text' => 'Valid', 'class' => 'badge-success', 'icon' => 'o-check-circle']; }
-        if (!empty($cat)) { return ['text' => 'Revisi', 'class' => 'badge-warning', 'icon' => 'o-exclamation-triangle']; }
+        if ($ver === '1') {
+            return ['text' => 'Valid', 'class' => 'badge-success', 'icon' => 'o-check-circle'];
+        }
+        if (!empty($cat)) {
+            return ['text' => 'Revisi', 'class' => 'badge-warning', 'icon' => 'o-exclamation-triangle'];
+        }
         return ['text' => 'Belum Valid', 'class' => 'badge-error', 'icon' => 'o-x-circle'];
     }
 };
@@ -268,32 +367,37 @@ new class extends Component {
 
 <div>
     <div class="mb-6">
-        <x-header title="Rekapitulasi Verifikasi Berkas" subtitle="Pantau progres verifikasi PPPK Paruh Waktu" size="text-2xl" separator progress-indicator />
+        <x-header title="Rekapitulasi Verifikasi Berkas" subtitle="Pantau progres verifikasi PPPK Paruh Waktu"
+                  size="text-2xl" separator progress-indicator/>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <x-stat title="Target Submit" value="{{ number_format($stats->total_submit ?? 0) }}" icon="o-users" class="bg-base-100">
+        <x-stat title="Target Submit" value="{{ number_format($stats->total_submit ?? 0) }}" icon="o-users"
+                class="bg-base-100">
             <x-slot:description>
                 <div class="mt-1 pt-1 border-t border-gray-200">
                     <span class="text-xs font-semibold text-gray-500">Lihat Belum Submit: {{ number_format($stats->total_belum_submit ?? 0) }}</span>
                 </div>
             </x-slot:description>
         </x-stat>
-        <x-stat title="Verifikasi Tuntas" value="{{ number_format($stats->total_verif_lengkap ?? 0) }}" icon="o-check-badge" class="bg-base-100">
+        <x-stat title="Verifikasi Tuntas" value="{{ number_format($stats->total_verif_lengkap ?? 0) }}"
+                icon="o-check-badge" class="bg-base-100">
             <x-slot:description>
                 <div class="mt-1 pt-1 border-t border-gray-200">
                     <span class="text-xs font-semibold text-gray-500">Belum Tuntas: {{ number_format($stats->total_verif_belum_lengkap ?? 0) }}</span>
                 </div>
             </x-slot:description>
         </x-stat>
-        <x-stat title="Total Berkas Valid" value="{{ number_format($stats->total_berkas_diverif ?? 0) }}" icon="o-document-check" class="bg-base-100">
+        <x-stat title="Total Berkas Valid" value="{{ number_format($stats->total_berkas_diverif ?? 0) }}"
+                icon="o-document-check" class="bg-base-100">
             <x-slot:description>
                 <div class="mt-1 pt-1 border-t border-gray-200">
                     <span class="text-xs font-semibold text-gray-500">Belum Valid: {{ number_format($stats->total_berkas_belum_diverif ?? 0) }}</span>
                 </div>
             </x-slot:description>
         </x-stat>
-        <x-stat title="Total Butuh Revisi" value="{{ number_format($stats->total_berkas_revisi ?? 0) }}" icon="o-pencil-square" class="bg-base-100">
+        <x-stat title="Total Butuh Revisi" value="{{ number_format($stats->total_berkas_revisi ?? 0) }}"
+                icon="o-pencil-square" class="bg-base-100">
             <x-slot:description>
                 <div class="mt-1 pt-1 border-t border-gray-200">
                     <span class="text-xs font-semibold text-gray-500">Berkas ditolak dan diberi catatan</span>
@@ -305,9 +409,11 @@ new class extends Component {
     <x-card>
         <div class="mb-4 flex flex-col md:flex-row gap-4 justify-between items-center">
             <div class="flex gap-2 w-full md:w-1/2">
-                <x-input placeholder="Cari NIP" wire:model.live.debounce.500ms="search" icon="o-magnifying-glass" clearable class="grow" />
+                <x-input placeholder="Cari NIP" wire:model.live.debounce.500ms="search" icon="o-magnifying-glass"
+                         clearable class="grow"/>
 
-                <x-button label="Filter Data" icon="o-funnel" wire:click="$set('drawerFilter', true)" class="btn-primary relative">
+                <x-button label="Filter Data" icon="o-funnel" wire:click="$set('drawerFilter', true)"
+                          class="btn-primary relative">
                     @if($this->isFiltered)
                         <span class="absolute -top-1 -right-1 flex h-3 w-3">
                             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -315,10 +421,18 @@ new class extends Component {
                         </span>
                     @endif
                 </x-button>
+
+                <x-button
+                        label="Download Excel"
+                        icon="o-arrow-down-tray"
+                        wire:click="downloadExcel"
+                        spinner="downloadExcel"
+                        class="btn-outline"
+                />
             </div>
 
             @if($this->isFiltered)
-                <x-button label="Hapus Semua Filter" icon="o-x-mark" wire:click="resetFilter" class="btn-sm btn-error" />
+                <x-button label="Hapus Semua Filter" icon="o-x-mark" wire:click="resetFilter" class="btn-sm btn-error"/>
             @endif
         </div>
 
@@ -342,91 +456,105 @@ new class extends Component {
 
             @scope('cell_berkas_ijazah', $row)
             @php $badge = $this->getBadge($row->ver2, $row->cat2); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'ijazah')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'ijazah')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_transkrip', $row)
             @php $badge = $this->getBadge($row->ver3, $row->cat3); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'transkrip')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'transkrip')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_str', $row)
             @php $badge = $this->getBadge($row->ver11, $row->cat11); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'ktpkk')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'ktpkk')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_skpppk', $row)
             @php $badge = $this->getBadge($row->ver17, $row->cat17); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'skpppk')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'skpppk')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_suket', $row)
             @php $badge = $this->getBadge($row->ver30, $row->cat30); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'suket')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'suket')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_mooc', $row)
             @php $badge = $this->getBadge($row->ver28, $row->cat28); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'mooc')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'mooc')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
 
             @scope('cell_berkas_skp', $row)
             @php $badge = $this->getBadge($row->ver29, $row->cat29); @endphp
-            <div class="flex justify-center" title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
+            <div class="flex justify-center"
+                 title="{{ $badge['text'] === 'Revisi' ? 'Revisi (Klik lihat catatan)' : $badge['text'] }}">
                 @if($badge['text'] === 'Revisi')
-                    <div wire:click="showCatatan('{{ $row->nip }}', 'skp')" class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
-                        <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <div wire:click="showCatatan('{{ $row->nip }}', 'skp')"
+                         class="cursor-pointer hover:scale-110 hover:opacity-80 transition-all">
+                        <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                     </div>
                 @else
-                    <x-badge :class="$badge['class']" :icon="$badge['icon']" />
+                    <x-badge :class="$badge['class']" :icon="$badge['icon']"/>
                 @endif
             </div>
             @endscope
@@ -447,24 +575,46 @@ new class extends Component {
                     icon="o-building-office-2"
             />
 
-            <hr class="my-4 border-gray-200" />
+            <x-select
+                    label="Status Submit"
+                    wire:model="submitFilter"
+                    :options="$submitFilterOptions"
+                    option-value="id"
+                    option-label="name"
+                    icon="o-paper-airplane"
+            />
+
+            <x-checkbox
+                    label="Hanya yang Punya Minimal 1 Catatan (Revisi)"
+                    hint="Pegawai dengan catatan pada salah satu dari 7 jenis berkas"
+                    wire:model="adaCatatanFilter"
+            />
+
+            <hr class="my-4 border-gray-200"/>
             <div class="text-sm font-semibold text-gray-500 mb-2">Berdasarkan Status dari 7 Berkas:</div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <x-select label="Ijazah" wire:model="f_ver2" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="Transkrip" wire:model="f_ver3" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="KTP/KK" wire:model="f_ver11" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="SK PPPK" wire:model="f_ver17" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="Suket Sehat" wire:model="f_ver30" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="MOOC" wire:model="f_ver28" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
-                <x-select label="SKP" wire:model="f_ver29" :options="$statusFileOptions" option-value="id" option-label="name" placeholder="Semua Status" />
+                <x-select label="Ijazah" wire:model="f_ver2" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="Transkrip" wire:model="f_ver3" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="KTP/KK" wire:model="f_ver11" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="SK PPPK" wire:model="f_ver17" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="Suket Sehat" wire:model="f_ver30" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="MOOC" wire:model="f_ver28" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
+                <x-select label="SKP" wire:model="f_ver29" :options="$statusFileOptions" option-value="id"
+                          option-label="name" placeholder="Semua Status"/>
             </div>
         </div>
 
         <x-slot:actions>
             <div class="flex gap-2 justify-end w-full">
-                <x-button label="Reset" wire:click="resetFilter" icon="o-arrow-path" class="btn-ghost text-red-500" />
-                <x-button label="Terapkan" wire:click="applyFilter" icon="o-check" class="btn-primary" />
+                <x-button label="Reset" wire:click="resetFilter" icon="o-arrow-path" class="btn-ghost text-red-500"/>
+                <x-button label="Terapkan" wire:click="applyFilter" icon="o-check" class="btn-primary"/>
             </div>
         </x-slot:actions>
     </x-drawer>
@@ -472,7 +622,7 @@ new class extends Component {
     <x-modal wire:model="modalCatatan" :title="$judulCatatan" class="backdrop-blur-sm">
         {{ $isiCatatan }}
         <x-slot:actions>
-            <x-button label="Tutup" wire:click="$set('modalCatatan', false)" class="btn-primary" />
+            <x-button label="Tutup" wire:click="$set('modalCatatan', false)" class="btn-primary"/>
         </x-slot:actions>
     </x-modal>
 </div>
