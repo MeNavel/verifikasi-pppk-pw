@@ -176,42 +176,39 @@ new class extends Component {
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        $target = DB::table('target_nips')
-            ->where('nip', $this->pegawai->nip)
-            ->first();
+        $target = DB::table('target_nips')->where('nip', $this->pegawai->nip)->first();
 
         if ($target && !empty($target->no_hp)) {
             $noHp = preg_replace('/[^0-9]/', '', $target->no_hp);
-
-            // Ambil Base URL Sidecar dari config/services.php atau .env
             $baseUrl = config('services.whatsapp.url');
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
 
-            $pesan  = "Yth. *$namaPegawai*\n\n";
-            $pesan .= "Mohon maaf, dokumen *SKP* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
-            $pesan .= "📌 *Catatan Verifikator:*\n_{$this->catatan}_\n\n";
-            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
-            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+            // 5 Variasi Spintax Evaluatif-Manajerial
+            $pesan  = "{Sdr/i|Kepada|Yth. Pegawai atas nama|Pemberitahuan kepada|Bapak/Ibu} *$namaPegawai*\n\n";
+
+            $pesan .= "{Mohon maaf, dokumen evaluasi kinerja *SKP* Saudara *DITOLAK OLEH TIM PENILAI*.|Disampaikan bahwa hasil verifikasi dokumen laporan *SKP* Saudara dinyatakan *BELUM VALID/PERLU REVISI*.|Berdasarkan pengecekan verifikator, dokumen *SKP (Sasaran Kinerja Pegawai)* Saudara *DIKEMBALIKAN UNTUK PERBAIKAN*.|Terdapat kekurangan pada dokumen *SKP* Saudara *HARUS DIREVISI KEMBALI*.|Pemberitahuan evaluasi: Laporan pada lampiran *SKP* Saudara belum memenuhi standar dan *BERSTATUS DITOLAK*.}\n\n";
+
+            $pesan .= "📌 *{Catatan Tim Penilai Kinerja|Reviu Evaluasi SKP|Instruksi Perbaikan Kinerja|Koreksi dari Verifikator SKP|Poin Kesalahan Laporan}:*\n_{$this->catatan}_\n\n";
+
+            $pesan .= "{Mohon untuk dikoreksi secara seksama sebelum mengunggah kembali perbaikan SKP di Silakon.|Saudara diminta untuk dokumen SKP dan melakukan submit ulang pada aplikasi Silakon.|Pastikan SKP telah ditandatangani oleh Pejabat Penilai Kinerja sebelum Saudara unggah kembali ke Silakon.|Harap segera melengkapi kekurangan dokumen SKP Saudara melalui sistem Silakon.|Kelancaran perpanjangan bergantung pada validitas capaian, silakan revisi SKP Saudara di Silakon.}\n\n";
+
+            $pesan .= "_{Dikirim secara otomatis oleh sistem verifikasi SKP.|Notifikasi dari Sistem Evaluasi Pegawai.|Layanan otomatis bot Silakon.|Pesan ini di-generate oleh sistem penilaian.|Bot notifikasi SKP.}_";
 
             try {
-                // HTTP POST Manual ke Service Sidecar
-                $response = Http::post($baseUrl . '/send-message', [
-                    'number'  => $noHp,
-                    'message' => $pesan,
-                ]);
+                $response = Http::post($baseUrl . '/send-message', ['number'  => $noHp, 'message' => $pesan]);
 
                 if ($response->successful()) {
-                    $this->success("Dokumen ditolak & notifikasi WA berhasil dikirim!");
+                    $this->success("Dokumen SKP ditolak & notifikasi WA berhasil dikirim!");
                 } else {
                     Log::warning("Gagal respon WA Sidecar: " . $response->body());
-                    $this->warning("Dokumen ditolak, tetapi notifikasi WA gagal dikirim.");
+                    $this->warning("Dokumen SKP ditolak, tetapi notifikasi WA gagal dikirim.");
                 }
             } catch (Exception $e) {
                 Log::error("Error HTTP POST WA Sidecar: " . $e->getMessage());
-                $this->warning("Dokumen ditolak, tetapi service WA Sidecar tidak merespons.");
+                $this->warning("Dokumen SKP ditolak, tetapi service WA Sidecar tidak merespons.");
             }
         } else {
-            $this->info("Dokumen ditolak (Nomor HP tidak ditemukan di target_nips).");
+            $this->info("Dokumen SKP ditolak (Nomor HP tidak ditemukan di target_nips).");
         }
 
         $this->catatan = '';

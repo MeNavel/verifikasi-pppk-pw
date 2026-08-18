@@ -208,54 +208,45 @@ new class extends Component {
         $catCol = $config['cat'];
         $catatanText = $config['opsi'][$opsiIndex] ?? 'Dokumen tidak sesuai';
 
-        // 1. Update status di database
         $this->pegawai->$verCol = 0;
         $this->pegawai->$catCol = $catatanText;
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        // 2. Proses Pengiriman WhatsApp
-        $targetNip = DB::table('target_nips')
-            ->where('nip', $this->pegawai->nip)
-            ->first();
-
+        $targetNip = DB::table('target_nips')->where('nip', $this->pegawai->nip)->first();
         $waSent = false;
 
         if ($targetNip && !empty($targetNip->no_hp)) {
-            // Cleaning nomor HP (hanya ambil angka)
             $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
-
-            // Susun Template Pesan
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
             $labelBerkas = $config['label'] ?? 'Dokumen';
 
-            $pesan  = "Yth. *$namaPegawai*\n\n";
-            $pesan .= "Mohon maaf, dokumen *$labelBerkas* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
-            $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
-            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
-            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+            // 5 Variasi Spintax Administratif-Operasional
+            $pesan  = "{Yth.|Kepada Yth.|Salam hormat,|Pemberitahuan kepada Yth.|Mohon perhatian kepada Yth.} *$namaPegawai*\n\n";
 
-            // Kirim WA dalam Try-Catch
+            $pesan .= "{Mohon maaf, berdasarkan hasil pemeriksaan, berkas *$labelBerkas* Saudara dinyatakan *BELUM MEMENUHI SYARAT / PERLU REVISI*.|Disampaikan dengan hormat bahwa usulan dokumen *$labelBerkas* Saudara dalam Perpanjangan PPPK Paruh Waktu *DIKEMBALIKAN UNTUK PERBAIKAN*.|Setelah dilakukan verifikasi administrasi, ditemukan ketidaksesuaian pada dokumen *$labelBerkas* Saudara sehingga *MEMERLUKAN TINDAK LANJUT*.|Bersama ini kami beritahukan bahwa unggahan *$labelBerkas* Saudara statusnya *DITOLAK SEMENTARA* karena belum sesuai ketentuan.|Pemberitahuan dari tim verifikator bahwa dokumen *$labelBerkas* yang Saudara sampaikan *BELUM DAPAT KAMI PROSES* dan butuh penyempurnaan.}\n\n";
+
+            $pesan .= "📌 *{Keterangan Verifikator|Alasan Pengembalian|Poin Perbaikan Kelengkapan|Catatan Kekurangan|Hasil Pengecekan Administrasi}:*\n_{$catatanText}_\n\n";
+
+            $pesan .= "{Dimohon kerjasamanya untuk segera melengkapi kekurangan melalui portal Silakon.|Saudara diminta untuk melakukan unggah ulang dokumen yang benar di aplikasi Silakon.|Harap maklum dan segera sesuaikan dokumen Saudara sesuai catatan via aplikasi Silakon.|Langkah selanjutnya, silakan perbaiki dan submit kembali dokumen Saudara di Silakon.|Proses perpanjangan Saudara akan dilanjutkan setelah perbaikan dilakukan melalui Silakon.}\n\n";
+
+            $pesan .= "_{Pesan ini dikirim secara otomatis oleh Sistem Verifikasi.|Notifikasi ini dihasilkan secara otomatis oleh sistem.|Pesan otomatis dari Sistem Verifikasi Silakon.|Peringatan otomatis dari layanan Silakon.|Sistem informasi Silakon.}_";
+
             $baseUrl = config('services.whatsapp.url');
             try {
-                $response = Http::post($baseUrl . '/send-message', [
-                    'number' => $noHp,
-                    'message' => $pesan,
-                ]);
+                $response = Http::post($baseUrl . '/send-message', ['number' => $noHp, 'message' => $pesan]);
                 $waSent = true;
             } catch (Throwable $e) {
                 Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());
             }
         }
 
-        // 3. Tampilkan Notifikasi Toast ke Verifikator
         if ($waSent) {
             $this->success("{$config['label']} ditolak & WA terkirim: $catatanText");
         } else {
             $this->warning("{$config['label']} ditolak (WA Gagal/No HP Kosong): $catatanText");
         }
 
-        // 4. Lanjut ke dokumen atau pegawai selanjutnya
         $this->nextFileOrPegawai();
     }
 

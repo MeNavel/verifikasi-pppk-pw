@@ -141,45 +141,38 @@ new class extends Component {
 
         $catatanText = $this->opsiTolak[$opsiIndex] ?? 'Dokumen tidak sesuai';
 
-        // Diubah ke ver28 dan cat28
         $this->pegawai->ver28 = 0;
         $this->pegawai->cat28 = $catatanText;
         $this->pegawai->tgl_submit = null;
         $this->pegawai->save();
 
-        $targetNip = DB::table('target_nips')
-            ->where('nip', $this->pegawai->nip)
-            ->first();
-
+        $targetNip = DB::table('target_nips')->where('nip', $this->pegawai->nip)->first();
         $waSent = false;
 
         if ($targetNip && !empty($targetNip->no_hp)) {
-            // Cleaning nomor HP (hanya ambil angka)
             $noHp = preg_replace('/[^0-9]/', '', $targetNip->no_hp);
-
-            // Susun Template Pesan
             $namaPegawai = $this->pegawai->nama ?? 'Pegawai';
 
-            $pesan  = "Yth. *$namaPegawai*\n\n";
-            $pesan .= "Mohon maaf, dokumen *Sertifikat MOOC* Anda pada Perpanjangan PPPK Paruh Waktu *DITOLAK / PERLU REVISI*.\n\n";
-            $pesan .= "📌 *Catatan Verifikator:*\n_{$catatanText}_\n\n";
-            $pesan .= "Silakan login ke aplikasi Silakon untuk memperbaiki dan mengunggah ulang dokumen tersebut.\n\n";
-            $pesan .= "_Pesan ini dikirim secara otomatis oleh Sistem Verifikasi._";
+            // 5 Variasi Spintax Akademik-Institusional
+            $pesan  = "{Yth. Sdr/i|Kepada Sdr/i|Salam, Bapak/Ibu|Informasi untuk|Perhatian,} *$namaPegawai*\n\n";
 
-            // Kirim WA dalam Try-Catch
+            $pesan .= "{Kami informasikan bahwa validasi dokumen *Sertifikat MOOC* Saudara saat ini *BELUM DAPAT DITERIMA*.|Terkait persyaratan Perpanjangan PPPK Paruh Waktu, *Sertifikat MOOC* yang Saudara unggah *MEMBUTUHKAN PENYESUAIAN KEMBALI*.|Berdasarkan reviu verifikator instansi, bukti *Sertifikat MOOC* Saudara *DITOLAK KARENA TIDAK SESUAI STANDAR*.|Pemberitahuan hasil peninjauan dokumen: *Sertifikat MOOC* Saudara statusnya *PERLU DIREVISI*.|Terdapat kendala dalam verifikasi berkas, sehingga *Sertifikat MOOC* Saudara kami *KEMBALIKAN* untuk diperbaiki.}\n\n";
+
+            $pesan .= "📌 *{Catatan Reviu Sertifikat|Evaluasi Dokumen|Temuan Validasi MOOC|Koreksi Berkas|Keterangan Penolakan Sertifikat}:*\n_{$catatanText}_\n\n";
+
+            $pesan .= "{Silakan periksa kembali validitas sertifikat Saudara dan unggah perbaikannya di Silakon.|Mohon segera sertakan sertifikat yang sah dan sesuai ketentuan melalui sistem Silakon.|Saudara diwajibkan untuk merevisi bukti kelulusan MOOC pada aplikasi Silakon secepatnya.|Harap unggah sertifikat dengan data yang benar dan terbaca jelas melalui platform Silakon.|Demi kelancaran proses perpanjangan, silakan perbaiki lampiran sertifikat Saudara di Silakon.}\n\n";
+
+            $pesan .= "_{Pesan otomatis dari verifikator Bidang Pengembangan Kompetensi.|Notifikasi sistem dari verikasi berkas Silakon.|Sistem bot Verifikasi BKPSDM.|Pesan ini di-generate oleh sistem Silakon.|Bot verifikasi berkas.}_";
+
             $baseUrl = config('services.whatsapp.url');
             try {
-                $response = Http::post($baseUrl . '/send-message', [
-                    'number' => $noHp,
-                    'message' => $pesan,
-                ]);
+                $response = Http::post($baseUrl . '/send-message', ['number' => $noHp, 'message' => $pesan]);
                 $waSent = true;
             } catch (Throwable $e) {
                 Log::error("Gagal mengirim WA penolakan ke NIP {$this->pegawai->nip}: " . $e->getMessage());
             }
         }
 
-        // 3. Tampilkan Notifikasi Toast ke Verifikator
         if ($waSent) {
             $this->success("Sertifikat MOOC ditolak & WA terkirim: $catatanText");
         } else {

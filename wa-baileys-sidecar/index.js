@@ -19,32 +19,45 @@ let isConnectionReady = false;
 let connectionReadySince = 0;
 
 // ============================================================
-// KONFIGURASI ANTI-DETEKSI / ANTI-SPAM (VERSI MAX PROTECTION)
+// KONFIGURASI ANTI-DETEKSI / ANTI-SPAM (VERSI ULTIMATE)
 // ============================================================
 const CONFIG = {
+    // Pengaturan Jeda (Delay)
     MIN_DELAY_MS: 5000,
     MAX_DELAY_MS: 15000,
     MIN_GAP_PER_NUMBER_MS: 2 * 60 * 1000,
 
+    // Pengaturan Retry
     MAX_RETRY: 3,
     RETRY_BASE_DELAY_MS: 20000,
     RETRY_JITTER_MS: 8000,
 
+    // Pengaturan Ketikan
     TYPING_MS_PER_CHAR: 35,
     TYPING_MIN_MS: 1500,
     TYPING_MAX_MS: 6000,
 
-    MAX_PER_HOUR: 40,
-    MAX_PER_DAY: 250,
+    // Kuota Maksimal (Akan diatur oleh sistem Warm-up)
+    MAX_PER_HOUR_TARGET: 40,
+    MAX_PER_DAY_TARGET: 250,
     COOLDOWN_AFTER_CONNECT_MS: 20000,
 
+    // Jam Operasional (Format 24 Jam)
+    WORK_START_HOUR: 8, // Mulai jam 08:00 pagi
+    WORK_END_HOUR: 16,  // Berhenti jam 20:00 malam
+
+    // File State
     STATE_FILE: path.join(__dirname, 'wa-sidecar-state.json'),
     SAVE_INTERVAL_MS: 5000,
 
-    // [BARU] Konfigurasi Hibrida (Bot + Manusia)
-    AUTO_READ_MESSAGES: false, // Set 'false' agar pesan masuk tidak otomatis centang biru oleh bot, sehingga Anda bisa membacanya sendiri
-    AUTO_REJECT_CALLS: false,   // Tolak panggilan otomatis agar bot tidak error saat ditelepon orang
+    // Konfigurasi Hibrida
+    AUTO_READ_MESSAGES: false,
+    AUTO_REJECT_CALLS: false,
 };
+
+// ============================================================
+// FUNGSI UTILITAS & ALGORITMA ANTI-SPAM
+// ============================================================
 
 function randomBetween(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -54,12 +67,38 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// [BARU] Fungsi Mutasi Teks (Mengecoh Deteksi Hash Meta)
-// Menambahkan karakter Zero-Width (tidak terlihat) secara acak
+/**
+ * Menghasilkan delay dengan Distribusi Gaussian (Kurva Lonceng)
+ */
+function gaussianDelay(mean, stdDev, min, max) {
+    let u1 = Math.random();
+    let u2 = Math.random();
+    while (u1 === 0) u1 = Math.random();
+    const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+    let result = Math.floor(mean + z0 * stdDev);
+    return Math.max(min, Math.min(max, result));
+}
+
+/**
+ * Mengubah string format Spintax {a|b|c} menjadi teks acak
+ */
+function parseSpintax(text) {
+    const spintaxRegex = /\{([^{}]+)\}/g;
+    while (spintaxRegex.test(text)) {
+        text = text.replace(spintaxRegex, (match, choices) => {
+            const options = choices.split('|');
+            return options[Math.floor(Math.random() * options.length)];
+        });
+    }
+    return text;
+}
+
+/**
+ * Menyisipkan karakter tak terlihat (Zero-Width) untuk mutasi hash
+ */
 function injectAntiSpamHash(text) {
     const hiddenChars = ['\u200B', '\u200C', '\u200D', '\uFEFF'];
     let hash = '';
-    // Sisipkan 2-5 karakter tak kasat mata di akhir pesan
     const hashLength = randomBetween(2, 5);
     for(let i = 0; i < hashLength; i++) {
         hash += hiddenChars[Math.floor(Math.random() * hiddenChars.length)];
@@ -68,12 +107,13 @@ function injectAntiSpamHash(text) {
 }
 
 // ============================================================
-// PERSISTENSI STATE
+// PERSISTENSI STATE & WARM-UP AKUN
 // ============================================================
 let messageQueue = [];
 let lastSentPerNumber = new Map();
 let sendLog = [];
 let isProcessingQueue = false;
+let accountStartDate = Date.now(); // Untuk melacak umur akun (Warm-up)
 
 function loadState() {
     try {
@@ -82,7 +122,8 @@ function loadState() {
             messageQueue = raw.messageQueue || [];
             lastSentPerNumber = new Map(raw.lastSentPerNumber || []);
             sendLog = raw.sendLog || [];
-            console.log(`📂 State dipulihkan: ${messageQueue.length} pesan tertunda di antrean.`);
+            accountStartDate = raw.accountStartDate || Date.now();
+            console.log(`📂 State dipulihkan: ${messageQueue.length} pesan tertunda.`);
         }
     } catch (err) {
         console.error('⚠️ Gagal memuat state sebelumnya:', err.message);
@@ -100,6 +141,7 @@ function saveStateDebounced() {
                 messageQueue,
                 lastSentPerNumber: Array.from(lastSentPerNumber.entries()),
                 sendLog: sendLog.slice(-1000),
+                accountStartDate
             });
             fs.writeFileSync(CONFIG.STATE_FILE, raw);
         } catch (err) { }
@@ -108,8 +150,34 @@ function saveStateDebounced() {
 loadState();
 
 // ============================================================
-// KUOTA PENGIRIMAN
+// MANAJEMEN KUOTA & JADWAL OPERASIONAL
 // ============================================================
+
+/**
+ * Mengecek apakah saat ini berada dalam jam kerja bot
+ */
+function isWithinWorkingHours() {
+    const currentHour = new Date().getHours();
+    return currentHour >= CONFIG.WORK_START_HOUR && currentHour < CONFIG.WORK_END_HOUR;
+}
+
+/**
+ * Menghitung kuota dinamis berdasarkan umur akun (Warm-up Schedule)
+ */
+function getDynamicQuota() {
+    const daysActive = Math.floor((Date.now() - accountStartDate) / (24 * 60 * 60 * 1000));
+
+    if (daysActive < 7) {
+        return { maxPerHour: 5, maxPerDay: 20 }; // Minggu 1: Sangat aman
+    } else if (daysActive < 14) {
+        return { maxPerHour: 15, maxPerDay: 80 }; // Minggu 2: Bertahap naik
+    } else if (daysActive < 21) {
+        return { maxPerHour: 25, maxPerDay: 150 }; // Minggu 3: Mendekati target
+    } else {
+        return { maxPerHour: CONFIG.MAX_PER_HOUR_TARGET, maxPerDay: CONFIG.MAX_PER_DAY_TARGET }; // Normal
+    }
+}
+
 function pruneSendLog() {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     sendLog = sendLog.filter((ts) => ts > cutoff);
@@ -124,7 +192,8 @@ function quotaStatus() {
 
 function isQuotaExceeded() {
     const { perHour, perDay } = quotaStatus();
-    return perHour >= CONFIG.MAX_PER_HOUR || perDay >= CONFIG.MAX_PER_DAY;
+    const currentQuota = getDynamicQuota();
+    return perHour >= currentQuota.maxPerHour || perDay >= currentQuota.maxPerDay;
 }
 
 // ============================================================
@@ -146,11 +215,19 @@ async function processQueue() {
             continue;
         }
 
+        // Cek Jam Operasional (Sleep Schedule)
+        if (!isWithinWorkingHours()) {
+            console.log(`🌙 Di luar jam kerja. Bot beristirahat. Menunggu hingga jam ${CONFIG.WORK_START_HOUR}:00...`);
+            await delay(60 * 60 * 1000); // Cek ulang setiap 1 jam
+            continue;
+        }
+
         const sinceReady = Date.now() - connectionReadySince;
         if (sinceReady < CONFIG.COOLDOWN_AFTER_CONNECT_MS) await delay(CONFIG.COOLDOWN_AFTER_CONNECT_MS - sinceReady);
 
         if (isQuotaExceeded()) {
-            console.log(`⏸️ Kuota penuh. Menunggu 5 menit...`);
+            const currentQuota = getDynamicQuota();
+            console.log(`⏸️ Kuota penuh (Batas Saat Ini: ${currentQuota.maxPerHour}/jam, ${currentQuota.maxPerDay}/hari). Menunggu 5 menit...`);
             await delay(5 * 60 * 1000);
             continue;
         }
@@ -167,7 +244,9 @@ async function processQueue() {
         await sendWithTypingSimulation(item);
 
         if (messageQueue.length > 0) {
-            await delay(randomBetween(CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS));
+            // [BARU] Menggunakan Gaussian Delay untuk jeda antar pesan
+            const nextDelay = gaussianDelay(10000, 3000, CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS);
+            await delay(nextDelay);
         }
     }
     isProcessingQueue = false;
@@ -183,11 +262,17 @@ async function sendWithTypingSimulation(item) {
         }
         const resolvedJid = check.jid || jid;
 
-        // [BARU] Mutasi Teks: Pengacak String Anti-Spam
-        const safeMessage = injectAntiSpamHash(message);
+        // [BARU] 1. Terapkan Spintax Parser
+        const dynamicMessage = parseSpintax(message);
+
+        // [BARU] 2. Mutasi Teks: Pengacak String Anti-Spam
+        const safeMessage = injectAntiSpamHash(dynamicMessage);
 
         await sock.presenceSubscribe(resolvedJid).catch(() => {});
-        const typingDuration = Math.min(CONFIG.TYPING_MAX_MS, Math.max(CONFIG.TYPING_MIN_MS, safeMessage.length * CONFIG.TYPING_MS_PER_CHAR));
+
+        // [BARU] 3. Simulasikan waktu ketik menggunakan Gaussian Delay
+        // Rata-rata 3 detik, Standar Deviasi 800ms
+        const typingDuration = gaussianDelay(3000, 800, CONFIG.TYPING_MIN_MS, CONFIG.TYPING_MAX_MS);
 
         await sock.sendPresenceUpdate('composing', resolvedJid);
         await delay(typingDuration);
@@ -198,7 +283,7 @@ async function sendWithTypingSimulation(item) {
         lastSentPerNumber.set(resolvedJid, Date.now());
         sendLog.push(Date.now());
         saveStateDebounced();
-        console.log(`✅ Pesan terkirim ke ${resolvedJid}`);
+        console.log(`✅ Pesan terkirim ke ${resolvedJid} | Pratinjau: "${safeMessage.substring(0, 20)}..."`);
     } catch (error) {
         console.error(`❌ Gagal kirim ke ${jid}:`, error.message);
         if (retryCount < CONFIG.MAX_RETRY) {
@@ -220,27 +305,24 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        markOnlineOnConnect: false, // Sangat penting agar status "Online" tidak menyala 24/7
+        markOnlineOnConnect: false,
         browser: Browsers.macOS('Chrome'),
         syncFullHistory: false,
-        generateHighQualityLinkPreview: false // Nonaktifkan agar tidak memberatkan request ke server saat kirim link
+        generateHighQualityLinkPreview: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // [BARU] Handler Panggilan (Call)
     sock.ev.on('call', async (calls) => {
         if (!CONFIG.AUTO_REJECT_CALLS) return;
         for (const call of calls) {
             if (call.status === 'offer') {
                 console.log(`🔕 Menolak panggilan masuk dari ${call.from}`);
-                // Tolak panggilan secara halus
                 await sock.rejectCall(call.id, call.from).catch(() => {});
             }
         }
     });
 
-    // Handler Auto-Read (Dibuat Kondisional agar tidak bentrok dengan pemakaian manual)
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type === 'notify' && CONFIG.AUTO_READ_MESSAGES) {
             for (const msg of messages) {
@@ -265,7 +347,10 @@ async function connectToWhatsApp() {
         } else if (connection === 'open') {
             isConnectionReady = true;
             connectionReadySince = Date.now();
-            console.log('✅ WA Baileys Ready & Terlindungi!');
+
+            const currentQuota = getDynamicQuota();
+            const daysActive = Math.floor((Date.now() - accountStartDate) / (24 * 60 * 60 * 1000));
+            console.log(`✅ WA Baileys Ready! (Umur Akun: ${daysActive} hari | Kuota Harian Saat Ini: ${currentQuota.maxPerDay})`);
         }
     });
 }
@@ -282,6 +367,7 @@ app.post('/send-message', async (req, res) => {
         let formattedNumber = number.replace(/[^0-9]/g, '');
         if (formattedNumber.startsWith('0')) formattedNumber = '62' + formattedNumber.substring(1);
 
+        // Pesan sekarang dikirim mentah, Spintax akan dieksekusi tepat sebelum dikirim
         enqueueMessage(`${formattedNumber}@s.whatsapp.net`, message);
         return res.json({ status: true, message: 'Masuk antrean.', queue_position: messageQueue.length });
     } catch (error) {
@@ -289,6 +375,6 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('🚀 WA Sidecar berjalan (Versi Max Protect)'));
+app.listen(3000, () => console.log('🚀 WA Sidecar berjalan (Versi Ultimate Protect)'));
 process.on('SIGINT', () => { saveStateDebounced(); setTimeout(() => process.exit(0), 1000); });
 process.on('SIGTERM', () => { saveStateDebounced(); setTimeout(() => process.exit(0), 1000); });
