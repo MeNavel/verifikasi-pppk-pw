@@ -37,14 +37,14 @@ const CONFIG = {
     TYPING_MIN_MS: 1500,
     TYPING_MAX_MS: 6000,
 
-    // Kuota Maksimal (Akan diatur oleh sistem Warm-up)
-    MAX_PER_HOUR_TARGET: 40,
-    MAX_PER_DAY_TARGET: 250,
+    // Kuota Maksimal Statis (Karena akun sudah lama)
+    MAX_PER_HOUR: 40,
+    MAX_PER_DAY: 250,
     COOLDOWN_AFTER_CONNECT_MS: 20000,
 
     // Jam Operasional (Format 24 Jam)
     WORK_START_HOUR: 8, // Mulai jam 08:00 pagi
-    WORK_END_HOUR: 16,  // Berhenti jam 20:00 malam
+    WORK_END_HOUR: 16,  // Berhenti jam 16:00 sore
 
     // File State
     STATE_FILE: path.join(__dirname, 'wa-sidecar-state.json'),
@@ -83,7 +83,7 @@ function gaussianDelay(mean, stdDev, min, max) {
  * Mengubah string format Spintax {a|b|c} menjadi teks acak
  */
 function parseSpintax(text) {
-    const spintaxRegex = /\{([^{}]+)\}/g;
+    const spintaxRegex = /\{([^{}]+)}/g;
     while (spintaxRegex.test(text)) {
         text = text.replace(spintaxRegex, (match, choices) => {
             const options = choices.split('|');
@@ -107,13 +107,12 @@ function injectAntiSpamHash(text) {
 }
 
 // ============================================================
-// PERSISTENSI STATE & WARM-UP AKUN
+// PERSISTENSI STATE
 // ============================================================
 let messageQueue = [];
 let lastSentPerNumber = new Map();
 let sendLog = [];
 let isProcessingQueue = false;
-let accountStartDate = Date.now(); // Untuk melacak umur akun (Warm-up)
 
 function loadState() {
     try {
@@ -122,7 +121,6 @@ function loadState() {
             messageQueue = raw.messageQueue || [];
             lastSentPerNumber = new Map(raw.lastSentPerNumber || []);
             sendLog = raw.sendLog || [];
-            accountStartDate = raw.accountStartDate || Date.now();
             console.log(`📂 State dipulihkan: ${messageQueue.length} pesan tertunda.`);
         }
     } catch (err) {
@@ -140,8 +138,7 @@ function saveStateDebounced() {
             const raw = JSON.stringify({
                 messageQueue,
                 lastSentPerNumber: Array.from(lastSentPerNumber.entries()),
-                sendLog: sendLog.slice(-1000),
-                accountStartDate
+                sendLog: sendLog.slice(-1000)
             });
             fs.writeFileSync(CONFIG.STATE_FILE, raw);
         } catch (err) { }
@@ -161,23 +158,6 @@ function isWithinWorkingHours() {
     return currentHour >= CONFIG.WORK_START_HOUR && currentHour < CONFIG.WORK_END_HOUR;
 }
 
-/**
- * Menghitung kuota dinamis berdasarkan umur akun (Warm-up Schedule)
- */
-function getDynamicQuota() {
-    const daysActive = Math.floor((Date.now() - accountStartDate) / (24 * 60 * 60 * 1000));
-
-    if (daysActive < 7) {
-        return { maxPerHour: 5, maxPerDay: 20 }; // Minggu 1: Sangat aman
-    } else if (daysActive < 14) {
-        return { maxPerHour: 15, maxPerDay: 80 }; // Minggu 2: Bertahap naik
-    } else if (daysActive < 21) {
-        return { maxPerHour: 25, maxPerDay: 150 }; // Minggu 3: Mendekati target
-    } else {
-        return { maxPerHour: CONFIG.MAX_PER_HOUR_TARGET, maxPerDay: CONFIG.MAX_PER_DAY_TARGET }; // Normal
-    }
-}
-
 function pruneSendLog() {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     sendLog = sendLog.filter((ts) => ts > cutoff);
@@ -192,8 +172,7 @@ function quotaStatus() {
 
 function isQuotaExceeded() {
     const { perHour, perDay } = quotaStatus();
-    const currentQuota = getDynamicQuota();
-    return perHour >= currentQuota.maxPerHour || perDay >= currentQuota.maxPerDay;
+    return perHour >= CONFIG.MAX_PER_HOUR || perDay >= CONFIG.MAX_PER_DAY;
 }
 
 // ============================================================
@@ -226,8 +205,7 @@ async function processQueue() {
         if (sinceReady < CONFIG.COOLDOWN_AFTER_CONNECT_MS) await delay(CONFIG.COOLDOWN_AFTER_CONNECT_MS - sinceReady);
 
         if (isQuotaExceeded()) {
-            const currentQuota = getDynamicQuota();
-            console.log(`⏸️ Kuota penuh (Batas Saat Ini: ${currentQuota.maxPerHour}/jam, ${currentQuota.maxPerDay}/hari). Menunggu 5 menit...`);
+            console.log(`⏸️ Kuota penuh (Batas Saat Ini: ${CONFIG.MAX_PER_HOUR}/jam, ${CONFIG.MAX_PER_DAY}/hari). Menunggu 5 menit...`);
             await delay(5 * 60 * 1000);
             continue;
         }
@@ -244,7 +222,7 @@ async function processQueue() {
         await sendWithTypingSimulation(item);
 
         if (messageQueue.length > 0) {
-            // [BARU] Menggunakan Gaussian Delay untuk jeda antar pesan
+            // Menggunakan Gaussian Delay untuk jeda antar pesan
             const nextDelay = gaussianDelay(10000, 3000, CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS);
             await delay(nextDelay);
         }
@@ -262,16 +240,15 @@ async function sendWithTypingSimulation(item) {
         }
         const resolvedJid = check.jid || jid;
 
-        // [BARU] 1. Terapkan Spintax Parser
+        // 1. Terapkan Spintax Parser
         const dynamicMessage = parseSpintax(message);
 
-        // [BARU] 2. Mutasi Teks: Pengacak String Anti-Spam
+        // 2. Mutasi Teks: Pengacak String Anti-Spam
         const safeMessage = injectAntiSpamHash(dynamicMessage);
 
         await sock.presenceSubscribe(resolvedJid).catch(() => {});
 
-        // [BARU] 3. Simulasikan waktu ketik menggunakan Gaussian Delay
-        // Rata-rata 3 detik, Standar Deviasi 800ms
+        // 3. Simulasikan waktu ketik menggunakan Gaussian Delay
         const typingDuration = gaussianDelay(3000, 800, CONFIG.TYPING_MIN_MS, CONFIG.TYPING_MAX_MS);
 
         await sock.sendPresenceUpdate('composing', resolvedJid);
@@ -306,7 +283,7 @@ async function connectToWhatsApp() {
         auth: state,
         printQRInTerminal: false,
         markOnlineOnConnect: false,
-        browser: Browsers.macOS('Chrome'),
+        browser: Browsers.macOS('Chrome'), // Properti Browser sudah diset ke macOS
         syncFullHistory: false,
         generateHighQualityLinkPreview: false
     });
@@ -347,10 +324,7 @@ async function connectToWhatsApp() {
         } else if (connection === 'open') {
             isConnectionReady = true;
             connectionReadySince = Date.now();
-
-            const currentQuota = getDynamicQuota();
-            const daysActive = Math.floor((Date.now() - accountStartDate) / (24 * 60 * 60 * 1000));
-            console.log(`✅ WA Baileys Ready! (Umur Akun: ${daysActive} hari | Kuota Harian Saat Ini: ${currentQuota.maxPerDay})`);
+            console.log(`✅ WA Baileys Ready! (Kuota Maksimal: ${CONFIG.MAX_PER_HOUR}/Jam | ${CONFIG.MAX_PER_DAY}/Hari)`);
         }
     });
 }
@@ -367,7 +341,6 @@ app.post('/send-message', async (req, res) => {
         let formattedNumber = number.replace(/[^0-9]/g, '');
         if (formattedNumber.startsWith('0')) formattedNumber = '62' + formattedNumber.substring(1);
 
-        // Pesan sekarang dikirim mentah, Spintax akan dieksekusi tepat sebelum dikirim
         enqueueMessage(`${formattedNumber}@s.whatsapp.net`, message);
         return res.json({ status: true, message: 'Masuk antrean.', queue_position: messageQueue.length });
     } catch (error) {
@@ -375,6 +348,6 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('🚀 WA Sidecar berjalan (Versi Ultimate Protect)'));
+app.listen(3000, () => console.log('🚀 WA Sidecar berjalan (Tanpa Sistem Warm-up)'));
 process.on('SIGINT', () => { saveStateDebounced(); setTimeout(() => process.exit(0), 1000); });
 process.on('SIGTERM', () => { saveStateDebounced(); setTimeout(() => process.exit(0), 1000); });
